@@ -2988,6 +2988,19 @@ def receive_data():
                     skip_minutes = market_open_settings.get('skip_minutes_after_open', 0)
                     skip_reason = f"Bỏ {skip_minutes} phút đầu sau khi mở cửa"
 
+                # ✨ Kiểm tra startup delay - không xét gap/spike trong 5 phút đầu khi khởi động
+                if should_calculate:
+                    startup_delay_minutes = audio_settings.get('startup_delay_minutes', 5)
+                    startup_delay_seconds = startup_delay_minutes * 60
+                    current_time_check = time.time()
+                    time_since_startup = current_time_check - app_startup_time
+
+                    if time_since_startup < startup_delay_seconds:
+                        should_calculate = False
+                        remaining_seconds = int(startup_delay_seconds - time_since_startup)
+                        remaining_minutes = remaining_seconds // 60
+                        skip_reason = f"Startup delay - còn {remaining_minutes} phút {remaining_seconds % 60} giây"
+
                 # ⚡ OPTIMIZATION: Tính spread 1 lần và truyền vào cả 2 hàm
                 spread_percent = calculate_spread_percent(
                     symbol_market_data.get('bid', 0),
