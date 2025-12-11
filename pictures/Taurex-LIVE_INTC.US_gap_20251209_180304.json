@@ -1,0 +1,22 @@
+{
+  "broker": "Taurex-LIVE",
+  "symbol": "INTC.US",
+  "detection_type": "gap",
+  "server_timestamp": 1765303384,
+  "server_time": "2025-12-09 18:03:04",
+  "gap": {
+    "detected": true,
+    "direction": "down",
+    "percentage": null,
+    "message": "GAP DOWN (Point): 1.0 points (Open: 40.51000, Ask: 40.50000 < Close_prev: 40.52000, ngưỡng: 1.0 points / 0.01%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-09 23:03:06"
+}

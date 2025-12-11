@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "gap_sound": "sounds/Gap.wav",
+  "spike_sound": "sounds/Spike.wav",
+  "delay_sound": "sounds/Delay.wav"
+}

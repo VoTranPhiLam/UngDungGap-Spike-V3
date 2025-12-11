@@ -1,0 +1,22 @@
+{
+  "broker": "ExclusiveMarkets2-Live 2",
+  "symbol": "US500.",
+  "detection_type": "gap",
+  "server_timestamp": 1765324106,
+  "server_time": "2025-12-09 23:48:26",
+  "gap": {
+    "detected": true,
+    "direction": "down",
+    "percentage": null,
+    "message": "GAP DOWN (Point): 2080.0 points (Open: 6838.10000, Ask: 6841.60000 < Close_prev: 6858.90000, ngưỡng: 1000.0 points / 10.0%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-10 04:48:30"
+}

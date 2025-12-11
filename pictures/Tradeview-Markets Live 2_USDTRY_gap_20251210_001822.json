@@ -1,0 +1,22 @@
+{
+  "broker": "Tradeview-Markets Live 2",
+  "symbol": "USDTRY",
+  "detection_type": "gap",
+  "server_timestamp": 1765325902,
+  "server_time": "2025-12-10 00:18:22",
+  "gap": {
+    "detected": true,
+    "direction": "up",
+    "percentage": null,
+    "message": "GAP UP (Point): 108961.0 points (Open: 42.54935, Close_prev: 41.45974, ngưỡng: 20000.0 points / 0.2%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-10 05:18:24"
+}

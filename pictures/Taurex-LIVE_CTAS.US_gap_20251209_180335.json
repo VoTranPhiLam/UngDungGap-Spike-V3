@@ -1,0 +1,22 @@
+{
+  "broker": "Taurex-LIVE",
+  "symbol": "CTAS.US",
+  "detection_type": "gap",
+  "server_timestamp": 1765303415,
+  "server_time": "2025-12-09 18:03:35",
+  "gap": {
+    "detected": true,
+    "direction": "up",
+    "percentage": null,
+    "message": "GAP UP (Point): 8.0 points (Open: 183.53000, Close_prev: 183.45000, ngưỡng: 5.0 points / 0.05%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-09 23:03:37"
+}

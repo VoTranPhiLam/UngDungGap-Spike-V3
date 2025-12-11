@@ -1,0 +1,22 @@
+{
+  "broker": "ThinkMarkets-Live 4",
+  "symbol": "MACQUARIE",
+  "detection_type": "gap",
+  "server_timestamp": 1765346235,
+  "server_time": "2025-12-10 05:57:15",
+  "gap": {
+    "detected": true,
+    "direction": "down",
+    "percentage": 0.9781829355730803,
+    "message": "GAP DOWN: 0.978% (Open: 193.35000, Ask: 193.43000 < Close_prev: 195.26000, ngưỡng: 0.3%)",
+    "threshold": 0.3
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": "DOWN",
+    "strength": 0.9781829355730803,
+    "message": "Spike: Up 0.978% / Down 0.978%",
+    "threshold": 1.3
+  },
+  "created_at": "2025-12-10 10:57:15"
+}

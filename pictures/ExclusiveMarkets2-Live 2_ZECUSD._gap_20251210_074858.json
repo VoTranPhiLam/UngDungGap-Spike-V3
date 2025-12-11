@@ -1,0 +1,22 @@
+{
+  "broker": "ExclusiveMarkets2-Live 2",
+  "symbol": "ZECUSD.",
+  "detection_type": "gap",
+  "server_timestamp": 1765352938,
+  "server_time": "2025-12-10 07:48:58",
+  "gap": {
+    "detected": true,
+    "direction": "up",
+    "percentage": null,
+    "message": "GAP UP (Point): 112.0 points (Open: 443.60000, Close_prev: 442.48000, ngưỡng: 100.0 points / 1.0%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-10 12:50:09"
+}

@@ -1,0 +1,22 @@
+{
+  "broker": "Taurex-LIVE",
+  "symbol": "INCY.US",
+  "detection_type": "gap",
+  "server_timestamp": 1765303184,
+  "server_time": "2025-12-09 17:59:44",
+  "gap": {
+    "detected": true,
+    "direction": "up",
+    "percentage": null,
+    "message": "GAP UP (Point): 6.0 points (Open: 96.91000, Close_prev: 96.85000, ngưỡng: 1.0 points / 0.01%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-09 22:59:46"
+}

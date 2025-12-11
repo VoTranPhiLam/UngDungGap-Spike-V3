@@ -1,0 +1,22 @@
+{
+  "broker": "Tradeview-Markets Live 2",
+  "symbol": "EURTRY",
+  "detection_type": "gap",
+  "server_timestamp": 1765325664,
+  "server_time": "2025-12-10 00:14:24",
+  "gap": {
+    "detected": true,
+    "direction": "up",
+    "percentage": null,
+    "message": "GAP UP (Point): 123928.0 points (Open: 49.48602, Close_prev: 48.24674, ngưỡng: 20000.0 points / 0.2%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-10 05:14:26"
+}

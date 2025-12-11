@@ -1,0 +1,22 @@
+{
+  "broker": "Taurex-LIVE",
+  "symbol": "ATO.US",
+  "detection_type": "gap",
+  "server_timestamp": 1765303448,
+  "server_time": "2025-12-09 18:04:08",
+  "gap": {
+    "detected": true,
+    "direction": "up",
+    "percentage": null,
+    "message": "GAP UP (Point): 10.0 points (Open: 166.63000, Close_prev: 166.53000, ngưỡng: 7.0 points / 0.07%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-09 23:04:10"
+}

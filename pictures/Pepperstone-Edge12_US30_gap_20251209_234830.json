@@ -1,0 +1,22 @@
+{
+  "broker": "Pepperstone-Edge12",
+  "symbol": "US30",
+  "detection_type": "gap",
+  "server_timestamp": 1765324110,
+  "server_time": "2025-12-09 23:48:30",
+  "gap": {
+    "detected": true,
+    "direction": "down",
+    "percentage": null,
+    "message": "GAP DOWN (Point): 3567.0 points (Open: 47528.00000, Ask: 47530.60000 < Close_prev: 47884.70000, ngưỡng: 1000.0 points / 100.0%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-10 04:48:33"
+}

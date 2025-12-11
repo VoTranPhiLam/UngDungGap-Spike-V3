@@ -1,0 +1,22 @@
+{
+  "broker": "ExclusiveMarkets2-Live 2",
+  "symbol": "JPN225.",
+  "detection_type": "gap",
+  "server_timestamp": 1765324106,
+  "server_time": "2025-12-09 23:48:26",
+  "gap": {
+    "detected": true,
+    "direction": "down",
+    "percentage": null,
+    "message": "GAP DOWN (Point): 21000.0 points (Open: 50792.40000, Ask: 50803.60000 < Close_prev: 51002.40000, ngưỡng: 20000.0 points / 200.0%)",
+    "threshold": null
+  },
+  "spike": {
+    "detected": false,
+    "spike_type": null,
+    "strength": null,
+    "message": "Spike: 0.0 points",
+    "threshold": null
+  },
+  "created_at": "2025-12-10 04:48:30"
+}
