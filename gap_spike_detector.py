@@ -169,7 +169,9 @@ auto_send_settings = {
     'start_column': 'A',  # Column to start writing data (e.g., A, B, C)
     'columns': {  # Column mapping - which data to send
         'assignee': True,
-        'time': True,
+        'send_time': True,  # Thời gian gửi (local time khi bấm hoàn thành)
+        'note': True,  # Note: "Báo Cáo" hoặc "Không có kèo nào hôm nay"
+        'time': True,  # Server time từ MT4/MT5
         'broker': True,
         'symbol': True,
         'type': True,  # Gap/Spike/Both
@@ -1025,48 +1027,46 @@ def timestamp_to_date_day(timestamp):
     return timestamp // 86400
 
 # ===================== GOOGLE SHEETS INTEGRATION =====================
-def push_to_google_sheets(accepted_items):
+def push_to_google_sheets(accepted_items, assignee=None):
     """
     Push accepted screenshot data to Google Sheets (using config from auto_send_settings)
-    
+
     Args:
-        accepted_items: List of screenshot data dictionaries
-    
+        accepted_items: List of screenshot data dictionaries (có thể là list rỗng)
+        assignee: Tên người gửi (dùng khi không có accepted_items)
+
     Returns:
         (success: bool, message: str)
     """
     try:
         if not os.path.exists(CREDENTIALS_FILE):
             return False, f"❌ Không tìm thấy file {CREDENTIALS_FILE}"
-        
-        if not accepted_items:
-            return False, "⚠️ Chưa có hình nào được Accept"
-        
+
         # Check if auto_send settings configured
         sheet_url = auto_send_settings.get('sheet_url', '').strip()
         if not sheet_url:
             return False, "⚠️ Chưa cấu hình Google Sheet!\n\nVui lòng vào Settings → Auto-Send Sheets để cấu hình Sheet URL."
-        
+
         # Authenticate with Google Sheets
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
-        
+
         logger.info("Authenticating with Google Sheets...")
         creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
         client = gspread.authorize(creds)
-        
+
         # Extract sheet ID from URL
         import re
         match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheet_url)
         if not match:
             return False, f"❌ URL không hợp lệ!\n\nURL phải có dạng:\nhttps://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/..."
-        
+
         sheet_id = match.group(1)
         logger.info(f"Opening sheet by ID: {sheet_id}")
         spreadsheet = client.open_by_key(sheet_id)
-        
+
         # Get the specified sheet (tab)
         sheet_name = auto_send_settings.get('sheet_name', '').strip()
         if sheet_name:
@@ -1078,46 +1078,91 @@ def push_to_google_sheets(accepted_items):
         else:
             sheet = spreadsheet.sheet1
             logger.info(f"Opened default sheet tab")
-        
+
+        # ✨ Lấy thời gian gửi (local time khi bấm hoàn thành)
+        send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         # Build row data based on column mapping
         columns = auto_send_settings.get('columns', {})
         rows = []
-        
-        for item in accepted_items:
-            row = []
-            
-            if columns.get('assignee', True):
-                row.append(item.get('assigned_name', ''))
 
+        if not accepted_items:
+            # ✨ Trường hợp KHÔNG có kèo - gửi 1 dòng duy nhất
+            # Lấy assignee từ tham số hoặc từ screenshot_settings
+            if not assignee:
+                assignee = screenshot_settings.get('assigned_name', '')
+
+            row = []
+            if columns.get('assignee', True):
+                row.append(assignee)
+
+            if columns.get('send_time', True):
+                row.append(send_time)
+
+            if columns.get('note', True):
+                row.append('Không có kèo nào hôm nay')
+
+            # Các cột còn lại để trống
             if columns.get('time', True):
-                # Use server time from item if available
-                server_time = item.get('server_time', '')
-                if server_time:
-                    row.append(server_time)
-                else:
-                    row.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            
+                row.append('')
             if columns.get('broker', True):
-                row.append(item.get('broker', ''))
-            
+                row.append('')
             if columns.get('symbol', True):
-                row.append(item.get('symbol', ''))
-            
+                row.append('')
             if columns.get('type', True):
-                row.append(item.get('detection_type', '').upper())
-            
+                row.append('')
             if columns.get('percentage', True):
-                row.append(item.get('percentage', ''))
-            
+                row.append('')
+
             rows.append(row)
-        
+            logger.info(f"No screenshots - sending 'Không có kèo' message for {assignee}")
+        else:
+            # ✨ Trường hợp CÓ kèo - gửi từng dòng với Note = "Báo Cáo"
+            for item in accepted_items:
+                row = []
+
+                if columns.get('assignee', True):
+                    row.append(item.get('assigned_name', ''))
+
+                if columns.get('send_time', True):
+                    row.append(send_time)
+
+                if columns.get('note', True):
+                    row.append('Báo Cáo')
+
+                if columns.get('time', True):
+                    # Use server time from item if available
+                    server_time = item.get('server_time', '')
+                    if server_time:
+                        row.append(server_time)
+                    else:
+                        row.append('')
+
+                if columns.get('broker', True):
+                    row.append(item.get('broker', ''))
+
+                if columns.get('symbol', True):
+                    row.append(item.get('symbol', ''))
+
+                if columns.get('type', True):
+                    row.append(item.get('detection_type', '').upper())
+
+                if columns.get('percentage', True):
+                    row.append(item.get('percentage', ''))
+
+                rows.append(row)
+
         # Append all rows at once (more efficient)
         logger.info(f"Appending {len(rows)} rows to sheet...")
         sheet.append_rows(rows)
-        
-        logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
-        return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
-        
+
+        if not accepted_items:
+            logger.info(f"Successfully pushed 'Không có kèo' message to Google Sheets")
+            return True, f"✅ Đã gửi thông báo 'Không có kèo nào hôm nay' lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
+        else:
+            logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
+            return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
+
     except Exception as e:
         error_msg = f"Lỗi khi gửi lên Google Sheets: {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -1895,7 +1940,9 @@ def load_auto_send_settings():
             # Ensure new column defaults exist
             default_columns = {
                 'assignee': True,
-                'time': True,
+                'send_time': True,  # Thời gian gửi (local time)
+                'note': True,  # Note: "Báo Cáo" hoặc "Không có kèo nào hôm nay"
+                'time': True,  # Server time từ MT4/MT5
                 'broker': True,
                 'symbol': True,
                 'type': True,
@@ -8858,8 +8905,14 @@ Cách sử dụng:
         self.col_assignee_var = tk.BooleanVar(value=columns_config.get('assignee', True))
         ttk.Checkbutton(columns_frame, text="👤 Người lọc (Tên)", variable=self.col_assignee_var).pack(anchor=tk.W, padx=20)
 
+        self.col_send_time_var = tk.BooleanVar(value=columns_config.get('send_time', True))
+        ttk.Checkbutton(columns_frame, text="📅 Thời gian gửi (Khi bấm Hoàn thành)", variable=self.col_send_time_var).pack(anchor=tk.W, padx=20)
+
+        self.col_note_var = tk.BooleanVar(value=columns_config.get('note', True))
+        ttk.Checkbutton(columns_frame, text="📝 Note (Báo Cáo / Không có kèo)", variable=self.col_note_var).pack(anchor=tk.W, padx=20)
+
         self.col_time_var = tk.BooleanVar(value=columns_config.get('time', True))
-        ttk.Checkbutton(columns_frame, text="⏰ Time (Thời gian chụp)", variable=self.col_time_var).pack(anchor=tk.W, padx=20)
+        ttk.Checkbutton(columns_frame, text="⏰ Server Time (Thời gian từ MT4/MT5)", variable=self.col_time_var).pack(anchor=tk.W, padx=20)
         
         self.col_broker_var = tk.BooleanVar(value=columns_config.get('broker', True))
         ttk.Checkbutton(columns_frame, text="🏦 Broker (Sàn)", variable=self.col_broker_var).pack(anchor=tk.W, padx=20)
@@ -8919,6 +8972,8 @@ Cách sử dụng:
 
             columns_config = auto_send_settings.setdefault('columns', {})
             columns_config['assignee'] = self.col_assignee_var.get()
+            columns_config['send_time'] = self.col_send_time_var.get()
+            columns_config['note'] = self.col_note_var.get()
             columns_config['time'] = self.col_time_var.get()
             columns_config['broker'] = self.col_broker_var.get()
             columns_config['symbol'] = self.col_symbol_var.get()
@@ -11423,39 +11478,45 @@ class PictureGalleryWindow:
     def complete_and_send(self):
         """Send all accepted screenshots to Google Sheets"""
         try:
-            if not self.accepted_screenshots:
-                messagebox.showinfo("Thông báo", "Chưa có ảnh nào được Accept!\n\nHãy click 'Accept' hoặc nhấn Enter trên các ảnh muốn gửi.")
-                self.window.grab_set()
-                return
-            
-            # Confirm
+            # ✨ Lấy assignee từ dropdown
+            assignee = self.assigned_name_var.get().strip() if hasattr(self, 'assigned_name_var') else ''
+
+            # Confirm - khác nhau tùy trường hợp
             count = len(self.accepted_screenshots)
-            confirm = messagebox.askyesno("Xác nhận", 
-                                         f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
-                                         f"Sau khi gửi thành công, list sẽ được xóa.")
-            
+            if not self.accepted_screenshots:
+                # ✨ Trường hợp KHÔNG có ảnh - gửi "Không có kèo nào hôm nay"
+                confirm = messagebox.askyesno("Xác nhận",
+                                             f"Bạn chưa Accept ảnh nào.\n\n"
+                                             f"Gửi thông báo 'Không có kèo nào hôm nay' lên Google Sheets?\n\n"
+                                             f"Người gửi: {assignee or '(Chưa chọn)'}")
+            else:
+                # ✨ Trường hợp CÓ ảnh - gửi "Báo Cáo"
+                confirm = messagebox.askyesno("Xác nhận",
+                                             f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
+                                             f"Sau khi gửi thành công, list sẽ được xóa.")
+
             if not confirm:
                 self.window.grab_set()
                 return
-            
+
             # Show progress
             self.info_label.config(text="⏳ Đang gửi lên Google Sheets...")
             self.window.update()
-            
-            # Push to Google Sheets
-            success, message = push_to_google_sheets(self.accepted_screenshots)
-            
+
+            # Push to Google Sheets (với assignee cho trường hợp không có ảnh)
+            success, message = push_to_google_sheets(self.accepted_screenshots, assignee=assignee)
+
             if success:
                 messagebox.showinfo("Thành công", message)
                 # Clear accepted list after successful send
                 self.clear_accepted()
             else:
                 messagebox.showerror("Lỗi", message)
-            
+
             self.info_label.config(text="")
             self.window.grab_set()
             self.window.focus_force()
-        
+
         except Exception as e:
             logger.error(f"Error sending to Google Sheets: {e}")
             messagebox.showerror("Lỗi", f"Không thể gửi: {str(e)}")
