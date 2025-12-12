@@ -163,7 +163,7 @@ auto_send_settings = {
     'columns': {  # Column mapping - which data to send
         'assignee': True,
         'send_time': True,  # Thời gian gửi (local time khi bấm hoàn thành)
-        'note': True,  # Note: "Báo Cáo" hoặc "Không có kèo nào hôm nay"
+        'note': True,  # Note: Luôn hiển thị "KÉO SÀN"
         'time': True,  # Server time từ MT4/MT5
         'broker': True,
         'symbol': True,
@@ -1093,7 +1093,7 @@ def push_to_google_sheets(accepted_items, assignee=None):
                 row.append(send_time)
 
             if columns.get('note', True):
-                row.append('Không có kèo nào hôm nay')
+                row.append('KÉO SÀN')
 
             # Các cột còn lại để trống
             if columns.get('time', True):
@@ -1108,9 +1108,9 @@ def push_to_google_sheets(accepted_items, assignee=None):
                 row.append('')
 
             rows.append(row)
-            logger.info(f"No screenshots - sending 'Không có kèo' message for {assignee}")
+            logger.info(f"No screenshots - sending 'KÉO SÀN' message for {assignee}")
         else:
-            # ✨ Trường hợp CÓ kèo - gửi từng dòng với Note = "Báo Cáo"
+            # ✨ Trường hợp CÓ kèo - gửi từng dòng với Note = "KÉO SÀN"
             for item in accepted_items:
                 row = []
 
@@ -1121,7 +1121,7 @@ def push_to_google_sheets(accepted_items, assignee=None):
                     row.append(send_time)
 
                 if columns.get('note', True):
-                    row.append('Báo Cáo')
+                    row.append('KÉO SÀN')
 
                 if columns.get('time', True):
                     # Use server time from item if available
@@ -1150,8 +1150,8 @@ def push_to_google_sheets(accepted_items, assignee=None):
         sheet.append_rows(rows)
 
         if not accepted_items:
-            logger.info(f"Successfully pushed 'Không có kèo' message to Google Sheets")
-            return True, f"✅ Đã gửi thông báo 'Không có kèo nào hôm nay' lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
+            logger.info(f"Successfully pushed 'KÉO SÀN' message to Google Sheets")
+            return True, f"✅ Đã gửi thông báo 'KÉO SÀN' lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
         else:
             logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
             return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
@@ -1881,7 +1881,7 @@ def load_auto_send_settings():
             default_columns = {
                 'assignee': True,
                 'send_time': True,  # Thời gian gửi (local time)
-                'note': True,  # Note: "Báo Cáo" hoặc "Không có kèo nào hôm nay"
+                'note': True,  # Note: Luôn hiển thị "KÉO SÀN"
                 'time': True,  # Server time từ MT4/MT5
                 'broker': True,
                 'symbol': True,
@@ -11075,13 +11075,13 @@ class PictureGalleryWindow:
             # Confirm - khác nhau tùy trường hợp
             count = len(self.accepted_screenshots)
             if not self.accepted_screenshots:
-                # ✨ Trường hợp KHÔNG có ảnh - gửi "Không có kèo nào hôm nay"
+                # ✨ Trường hợp KHÔNG có ảnh - gửi "KÉO SÀN"
                 confirm = messagebox.askyesno("Xác nhận",
                                              f"Bạn chưa Accept ảnh nào.\n\n"
-                                             f"Gửi thông báo 'Không có kèo nào hôm nay' lên Google Sheets?\n\n"
+                                             f"Gửi thông báo 'KÉO SÀN' lên Google Sheets?\n\n"
                                              f"Người gửi: {assignee or '(Chưa chọn)'}")
             else:
-                # ✨ Trường hợp CÓ ảnh - gửi "Báo Cáo"
+                # ✨ Trường hợp CÓ ảnh - gửi "KÉO SÀN"
                 confirm = messagebox.askyesno("Xác nhận",
                                              f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
                                              f"Sau khi gửi thành công, list sẽ được xóa.")
