@@ -140,13 +140,6 @@ symbol_filter_settings = {
 
 SYMBOL_FILTER_FILE = 'symbol_filter_settings.json'
 
-# Broker selection settings (cho phép chọn sàn khi khởi động)
-broker_selection_settings = {
-    'enabled_brokers': []  # Danh sách các broker được chọn để kết nối
-}
-
-BROKER_SELECTION_FILE = 'broker_selection_settings.json'
-
 PICTURE_ASSIGNEE_CHOICES = [
     '',  # Allow clearing selection
     'Tâm',
@@ -169,9 +162,7 @@ auto_send_settings = {
     'start_column': 'A',  # Column to start writing data (e.g., A, B, C)
     'columns': {  # Column mapping - which data to send
         'assignee': True,
-        'send_time': True,  # Thời gian gửi (local time khi bấm hoàn thành)
-        'note': True,  # Note: "Báo Cáo" hoặc "Không có kèo nào hôm nay"
-        'time': True,  # Server time từ MT4/MT5
+        'time': True,
         'broker': True,
         'symbol': True,
         'type': True,  # Gap/Spike/Both
@@ -1027,46 +1018,48 @@ def timestamp_to_date_day(timestamp):
     return timestamp // 86400
 
 # ===================== GOOGLE SHEETS INTEGRATION =====================
-def push_to_google_sheets(accepted_items, assignee=None):
+def push_to_google_sheets(accepted_items):
     """
     Push accepted screenshot data to Google Sheets (using config from auto_send_settings)
-
+    
     Args:
-        accepted_items: List of screenshot data dictionaries (có thể là list rỗng)
-        assignee: Tên người gửi (dùng khi không có accepted_items)
-
+        accepted_items: List of screenshot data dictionaries
+    
     Returns:
         (success: bool, message: str)
     """
     try:
         if not os.path.exists(CREDENTIALS_FILE):
             return False, f"❌ Không tìm thấy file {CREDENTIALS_FILE}"
-
+        
+        if not accepted_items:
+            return False, "⚠️ Chưa có hình nào được Accept"
+        
         # Check if auto_send settings configured
         sheet_url = auto_send_settings.get('sheet_url', '').strip()
         if not sheet_url:
             return False, "⚠️ Chưa cấu hình Google Sheet!\n\nVui lòng vào Settings → Auto-Send Sheets để cấu hình Sheet URL."
-
+        
         # Authenticate with Google Sheets
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
-
+        
         logger.info("Authenticating with Google Sheets...")
         creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
         client = gspread.authorize(creds)
-
+        
         # Extract sheet ID from URL
         import re
         match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheet_url)
         if not match:
             return False, f"❌ URL không hợp lệ!\n\nURL phải có dạng:\nhttps://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/..."
-
+        
         sheet_id = match.group(1)
         logger.info(f"Opening sheet by ID: {sheet_id}")
         spreadsheet = client.open_by_key(sheet_id)
-
+        
         # Get the specified sheet (tab)
         sheet_name = auto_send_settings.get('sheet_name', '').strip()
         if sheet_name:
@@ -1078,91 +1071,46 @@ def push_to_google_sheets(accepted_items, assignee=None):
         else:
             sheet = spreadsheet.sheet1
             logger.info(f"Opened default sheet tab")
-
-        # ✨ Lấy thời gian gửi (local time khi bấm hoàn thành)
-        send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
+        
         # Build row data based on column mapping
         columns = auto_send_settings.get('columns', {})
         rows = []
-
-        if not accepted_items:
-            # ✨ Trường hợp KHÔNG có kèo - gửi 1 dòng duy nhất
-            # Lấy assignee từ tham số hoặc từ screenshot_settings
-            if not assignee:
-                assignee = screenshot_settings.get('assigned_name', '')
-
+        
+        for item in accepted_items:
             row = []
+            
             if columns.get('assignee', True):
-                row.append(assignee)
+                row.append(item.get('assigned_name', ''))
 
-            if columns.get('send_time', True):
-                row.append(send_time)
-
-            if columns.get('note', True):
-                row.append('Không có kèo nào hôm nay')
-
-            # Các cột còn lại để trống
             if columns.get('time', True):
-                row.append('')
+                # Use server time from item if available
+                server_time = item.get('server_time', '')
+                if server_time:
+                    row.append(server_time)
+                else:
+                    row.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            
             if columns.get('broker', True):
-                row.append('')
+                row.append(item.get('broker', ''))
+            
             if columns.get('symbol', True):
-                row.append('')
+                row.append(item.get('symbol', ''))
+            
             if columns.get('type', True):
-                row.append('')
+                row.append(item.get('detection_type', '').upper())
+            
             if columns.get('percentage', True):
-                row.append('')
-
+                row.append(item.get('percentage', ''))
+            
             rows.append(row)
-            logger.info(f"No screenshots - sending 'Không có kèo' message for {assignee}")
-        else:
-            # ✨ Trường hợp CÓ kèo - gửi từng dòng với Note = "Báo Cáo"
-            for item in accepted_items:
-                row = []
-
-                if columns.get('assignee', True):
-                    row.append(item.get('assigned_name', ''))
-
-                if columns.get('send_time', True):
-                    row.append(send_time)
-
-                if columns.get('note', True):
-                    row.append('Báo Cáo')
-
-                if columns.get('time', True):
-                    # Use server time from item if available
-                    server_time = item.get('server_time', '')
-                    if server_time:
-                        row.append(server_time)
-                    else:
-                        row.append('')
-
-                if columns.get('broker', True):
-                    row.append(item.get('broker', ''))
-
-                if columns.get('symbol', True):
-                    row.append(item.get('symbol', ''))
-
-                if columns.get('type', True):
-                    row.append(item.get('detection_type', '').upper())
-
-                if columns.get('percentage', True):
-                    row.append(item.get('percentage', ''))
-
-                rows.append(row)
-
+        
         # Append all rows at once (more efficient)
         logger.info(f"Appending {len(rows)} rows to sheet...")
         sheet.append_rows(rows)
-
-        if not accepted_items:
-            logger.info(f"Successfully pushed 'Không có kèo' message to Google Sheets")
-            return True, f"✅ Đã gửi thông báo 'Không có kèo nào hôm nay' lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
-        else:
-            logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
-            return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
-
+        
+        logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
+        return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
+        
     except Exception as e:
         error_msg = f"Lỗi khi gửi lên Google Sheets: {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -1543,59 +1491,6 @@ def save_symbol_filter_settings():
     except Exception as e:
         logger.error(f"Error saving symbol filter settings: {e}")
 
-# ===================== BROKER SELECTION SETTINGS =====================
-def load_broker_selection_settings():
-    """Load broker selection settings from JSON file"""
-    global broker_selection_settings
-    try:
-        if os.path.exists(BROKER_SELECTION_FILE):
-            with open(BROKER_SELECTION_FILE, 'r', encoding='utf-8') as f:
-                loaded = json.load(f) or {}
-
-            enabled_brokers = loaded.get('enabled_brokers', [])
-            if not isinstance(enabled_brokers, list):
-                enabled_brokers = []
-
-            broker_selection_settings['enabled_brokers'] = enabled_brokers
-
-            logger.info(
-                "Loaded broker selection settings: %d brokers enabled",
-                len(enabled_brokers)
-            )
-        else:
-            broker_selection_settings['enabled_brokers'] = []
-            logger.info("No broker_selection_settings.json found, using defaults")
-    except Exception as e:
-        logger.error(f"Error loading broker selection settings: {e}")
-        broker_selection_settings['enabled_brokers'] = []
-
-def save_broker_selection_settings():
-    """Save broker selection settings to JSON file"""
-    try:
-        payload = {
-            'enabled_brokers': broker_selection_settings.get('enabled_brokers', [])
-        }
-
-        with open(BROKER_SELECTION_FILE, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-
-        logger.info(
-            "Saved broker selection settings: %d brokers enabled",
-            len(payload['enabled_brokers'])
-        )
-    except Exception as e:
-        logger.error(f"Error saving broker selection settings: {e}")
-
-def is_broker_enabled(broker):
-    """Check if a broker is enabled for data reception"""
-    enabled_brokers = broker_selection_settings.get('enabled_brokers', [])
-
-    # Nếu danh sách rỗng, mặc định cho phép tất cả (backward compatibility)
-    if not enabled_brokers:
-        return True
-
-    return broker in enabled_brokers
-
 # ===================== SYMBOL FILTER HELPERS =====================
 def is_symbol_selected_for_detection(broker, symbol):
     """
@@ -1940,9 +1835,7 @@ def load_auto_send_settings():
             # Ensure new column defaults exist
             default_columns = {
                 'assignee': True,
-                'send_time': True,  # Thời gian gửi (local time)
-                'note': True,  # Note: "Báo Cáo" hoặc "Không có kèo nào hôm nay"
-                'time': True,  # Server time từ MT4/MT5
+                'time': True,
                 'broker': True,
                 'symbol': True,
                 'type': True,
@@ -2871,13 +2764,6 @@ def receive_data():
         broker = data.get('broker', 'Unknown')
         timestamp = data.get('timestamp', int(time.time()))
         symbols_data = data.get('data', [])
-
-        # Kiểm tra xem broker có được chọn để nhận dữ liệu hay không
-        if not is_broker_enabled(broker):
-            return jsonify({
-                'status': 'ignored',
-                'message': f'Broker "{broker}" is not enabled for data reception'
-            }), 200
         
         with data_lock:
             # Optimize: Use setdefault() instead of if-check (faster dict access)
@@ -3034,19 +2920,6 @@ def receive_data():
                     should_calculate = False
                     skip_minutes = market_open_settings.get('skip_minutes_after_open', 0)
                     skip_reason = f"Bỏ {skip_minutes} phút đầu sau khi mở cửa"
-
-                # ✨ Kiểm tra startup delay - không xét gap/spike trong 5 phút đầu khi khởi động
-                if should_calculate:
-                    startup_delay_minutes = audio_settings.get('startup_delay_minutes', 5)
-                    startup_delay_seconds = startup_delay_minutes * 60
-                    current_time_check = time.time()
-                    time_since_startup = current_time_check - app_startup_time
-
-                    if time_since_startup < startup_delay_seconds:
-                        should_calculate = False
-                        remaining_seconds = int(startup_delay_seconds - time_since_startup)
-                        remaining_minutes = remaining_seconds // 60
-                        skip_reason = f"Startup delay - còn {remaining_minutes} phút {remaining_seconds % 60} giây"
 
                 # ⚡ OPTIMIZATION: Tính spread 1 lần và truyền vào cả 2 hàm
                 spread_percent = calculate_spread_percent(
@@ -3213,330 +3086,6 @@ def health():
         "total_symbols": sum(len(symbols) for symbols in market_data.values())
     })
 
-# ===================== BROKER SELECTION DIALOGS =====================
-class BrokerSelectionDialog:
-    """Dialog chọn sàn khi khởi động ứng dụng"""
-
-    def __init__(self, parent):
-        self.result = None
-        self.broker_vars = {}
-
-        self.window = tk.Toplevel(parent)
-        self.window.title("🏦 Chọn Sàn Kết Nối")
-        self.window.geometry("600x500")
-
-        # Center the window
-        screen_width = self.window.winfo_screenwidth()
-        screen_height = self.window.winfo_screenheight()
-        x = (screen_width - 600) // 2
-        y = (screen_height - 500) // 2
-        self.window.geometry(f"600x500+{x}+{y}")
-
-        # Make window modal
-        self.window.transient(parent)
-        self.window.grab_set()
-        self.window.lift()
-        self.window.focus_force()
-
-        # Header
-        header_frame = ttk.Frame(self.window, padding="20")
-        header_frame.pack(fill=tk.X)
-
-        ttk.Label(
-            header_frame,
-            text="Chọn Sàn Để Kết Nối",
-            font=('Arial', 16, 'bold')
-        ).pack()
-
-        ttk.Label(
-            header_frame,
-            text="Chỉ những sàn được chọn sẽ nhận dữ liệu từ EA",
-            font=('Arial', 10),
-            foreground='gray'
-        ).pack(pady=5)
-
-        # Broker list frame
-        list_frame = ttk.LabelFrame(self.window, text="Danh sách Sàn", padding="10")
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Scrollable frame
-        canvas = tk.Canvas(list_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Load available brokers from previous settings
-        available_brokers = self._get_available_brokers()
-        enabled_brokers = broker_selection_settings.get('enabled_brokers', [])
-
-        if not available_brokers:
-            ttk.Label(
-                scrollable_frame,
-                text="Chưa có sàn nào trong dữ liệu.\nVui lòng chạy EA trên MT4/MT5 trước.",
-                font=('Arial', 10),
-                foreground='red'
-            ).pack(pady=20)
-        else:
-            for broker in sorted(available_brokers):
-                var = tk.BooleanVar(value=(broker in enabled_brokers or not enabled_brokers))
-                self.broker_vars[broker] = var
-
-                cb = ttk.Checkbutton(
-                    scrollable_frame,
-                    text=broker,
-                    variable=var,
-                    style='TCheckbutton'
-                )
-                cb.pack(anchor=tk.W, pady=5, padx=10)
-
-        # Buttons
-        button_frame = ttk.Frame(self.window, padding="10")
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
-
-        ttk.Button(
-            button_frame,
-            text="Chọn tất cả",
-            command=self._select_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="Bỏ chọn tất cả",
-            command=self._deselect_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="✅ Xác nhận",
-            command=self._confirm,
-            style='Accent.TButton'
-        ).pack(side=tk.RIGHT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="❌ Hủy",
-            command=self._cancel
-        ).pack(side=tk.RIGHT, padx=5)
-
-        # Handle window close
-        self.window.protocol("WM_DELETE_WINDOW", self._cancel)
-
-    def _get_available_brokers(self):
-        """Lấy danh sách broker từ các nguồn có sẵn"""
-        brokers = set()
-
-        # From market_data (nếu có)
-        brokers.update(market_data.keys())
-
-        # From symbol_filter_settings
-        if 'selection' in symbol_filter_settings:
-            brokers.update(symbol_filter_settings['selection'].keys())
-
-        # From saved broker selection
-        brokers.update(broker_selection_settings.get('enabled_brokers', []))
-
-        # Remove wildcard
-        brokers.discard('*')
-
-        return brokers
-
-    def _select_all(self):
-        """Chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(True)
-
-    def _deselect_all(self):
-        """Bỏ chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(False)
-
-    def _confirm(self):
-        """Xác nhận lựa chọn"""
-        selected = [broker for broker, var in self.broker_vars.items() if var.get()]
-        self.result = selected
-        self.window.destroy()
-
-    def _cancel(self):
-        """Hủy bỏ"""
-        self.result = None
-        self.window.destroy()
-
-    def show(self):
-        """Hiển thị dialog và đợi kết quả"""
-        self.window.wait_window()
-        return self.result
-
-
-class BrokerManagementDialog:
-    """Dialog quản lý sàn với combobox hiển thị sản phẩm"""
-
-    def __init__(self, parent):
-        self.broker_vars = {}
-        self.broker_combos = {}
-
-        self.window = tk.Toplevel(parent)
-        self.window.title("🏦 Quản Lý Sàn")
-        self.window.geometry("900x600")
-
-        # Center the window
-        screen_width = self.window.winfo_screenwidth()
-        screen_height = self.window.winfo_screenheight()
-        x = (screen_width - 900) // 2
-        y = (screen_height - 600) // 2
-        self.window.geometry(f"900x600+{x}+{y}")
-
-        # Make window modal
-        self.window.transient(parent)
-        self.window.grab_set()
-        self.window.lift()
-        self.window.focus_force()
-
-        # Header
-        header_frame = ttk.Frame(self.window, padding="20")
-        header_frame.pack(fill=tk.X)
-
-        ttk.Label(
-            header_frame,
-            text="Quản Lý Sàn",
-            font=('Arial', 16, 'bold')
-        ).pack()
-
-        ttk.Label(
-            header_frame,
-            text="Chọn/bỏ chọn sàn và xem các sản phẩm có trong MarketWatch",
-            font=('Arial', 10),
-            foreground='gray'
-        ).pack(pady=5)
-
-        # Broker list frame
-        list_frame = ttk.LabelFrame(self.window, text="Danh sách Sàn & Sản phẩm", padding="10")
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Scrollable frame
-        canvas = tk.Canvas(list_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Load brokers
-        available_brokers = list(market_data.keys())
-        enabled_brokers = broker_selection_settings.get('enabled_brokers', [])
-
-        if not available_brokers:
-            ttk.Label(
-                scrollable_frame,
-                text="Chưa có sàn nào kết nối.\nVui lòng chạy EA trên MT4/MT5.",
-                font=('Arial', 10),
-                foreground='red'
-            ).pack(pady=20)
-        else:
-            for broker in sorted(available_brokers):
-                # Broker frame
-                broker_frame = ttk.Frame(scrollable_frame)
-                broker_frame.pack(fill=tk.X, pady=10, padx=10)
-
-                # Checkbox
-                var = tk.BooleanVar(value=(broker in enabled_brokers or not enabled_brokers))
-                self.broker_vars[broker] = var
-
-                cb = ttk.Checkbutton(
-                    broker_frame,
-                    text=broker,
-                    variable=var,
-                    style='TCheckbutton',
-                    command=lambda b=broker: self._on_broker_toggle(b)
-                )
-                cb.pack(side=tk.LEFT, padx=(0, 10))
-
-                # Combobox for symbols
-                symbols = list(market_data.get(broker, {}).keys())
-                combo = ttk.Combobox(
-                    broker_frame,
-                    values=symbols,
-                    state='readonly',
-                    width=50
-                )
-                if symbols:
-                    combo.set(f"📊 {len(symbols)} sản phẩm - Click để xem")
-                else:
-                    combo.set("Không có sản phẩm")
-
-                combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                self.broker_combos[broker] = combo
-
-        # Buttons
-        button_frame = ttk.Frame(self.window, padding="10")
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
-
-        ttk.Button(
-            button_frame,
-            text="Chọn tất cả",
-            command=self._select_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="Bỏ chọn tất cả",
-            command=self._deselect_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="💾 Lưu",
-            command=self._save,
-            style='Accent.TButton'
-        ).pack(side=tk.RIGHT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="❌ Đóng",
-            command=self.window.destroy
-        ).pack(side=tk.RIGHT, padx=5)
-
-    def _on_broker_toggle(self, broker):
-        """Xử lý khi toggle broker"""
-        is_enabled = self.broker_vars[broker].get()
-        logger.info(f"Broker {broker} {'enabled' if is_enabled else 'disabled'}")
-
-    def _select_all(self):
-        """Chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(True)
-
-    def _deselect_all(self):
-        """Bỏ chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(False)
-
-    def _save(self):
-        """Lưu cài đặt"""
-        selected = [broker for broker, var in self.broker_vars.items() if var.get()]
-        broker_selection_settings['enabled_brokers'] = selected
-        save_broker_selection_settings()
-        messagebox.showinfo("Thành công", f"Đã lưu {len(selected)} sàn được chọn")
-        self.window.destroy()
-
-
 # ===================== GUI APPLICATION =====================
 class GapSpikeDetectorGUI:
     def __init__(self, root):
@@ -3587,7 +3136,6 @@ class GapSpikeDetectorGUI:
         delay_spinbox.pack(side=tk.LEFT, padx=5)
         ttk.Label(control_frame, text="(⚙️ Cài đặt để xem thêm)", foreground='gray', font=('Arial', 8)).pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(control_frame, text="🏦 Chọn sàn", command=self.open_broker_management).pack(side=tk.RIGHT, padx=5)
         ttk.Button(control_frame, text="Cài đặt", command=self.open_settings).pack(side=tk.RIGHT, padx=5)
         ttk.Button(control_frame, text="📸 Hình ảnh", command=self.open_picture_gallery).pack(side=tk.RIGHT, padx=5)
         ttk.Button(control_frame, text="🔄 Khởi động lại Python", command=self.reset_python_connection,
@@ -5599,11 +5147,7 @@ class GapSpikeDetectorGUI:
     def open_settings(self):
         """Mở cửa sổ settings"""
         SettingsWindow(self.root, self)
-
-    def open_broker_management(self):
-        """Mở cửa sổ quản lý sàn"""
-        BrokerManagementDialog(self.root)
-
+    
     def open_trading_hours(self):
         """Mở cửa sổ Trading Hours"""
         TradingHoursWindow(self.root, self)
@@ -8905,14 +8449,8 @@ Cách sử dụng:
         self.col_assignee_var = tk.BooleanVar(value=columns_config.get('assignee', True))
         ttk.Checkbutton(columns_frame, text="👤 Người lọc (Tên)", variable=self.col_assignee_var).pack(anchor=tk.W, padx=20)
 
-        self.col_send_time_var = tk.BooleanVar(value=columns_config.get('send_time', True))
-        ttk.Checkbutton(columns_frame, text="📅 Thời gian gửi (Khi bấm Hoàn thành)", variable=self.col_send_time_var).pack(anchor=tk.W, padx=20)
-
-        self.col_note_var = tk.BooleanVar(value=columns_config.get('note', True))
-        ttk.Checkbutton(columns_frame, text="📝 Note (Báo Cáo / Không có kèo)", variable=self.col_note_var).pack(anchor=tk.W, padx=20)
-
         self.col_time_var = tk.BooleanVar(value=columns_config.get('time', True))
-        ttk.Checkbutton(columns_frame, text="⏰ Server Time (Thời gian từ MT4/MT5)", variable=self.col_time_var).pack(anchor=tk.W, padx=20)
+        ttk.Checkbutton(columns_frame, text="⏰ Time (Thời gian chụp)", variable=self.col_time_var).pack(anchor=tk.W, padx=20)
         
         self.col_broker_var = tk.BooleanVar(value=columns_config.get('broker', True))
         ttk.Checkbutton(columns_frame, text="🏦 Broker (Sàn)", variable=self.col_broker_var).pack(anchor=tk.W, padx=20)
@@ -8972,8 +8510,6 @@ Cách sử dụng:
 
             columns_config = auto_send_settings.setdefault('columns', {})
             columns_config['assignee'] = self.col_assignee_var.get()
-            columns_config['send_time'] = self.col_send_time_var.get()
-            columns_config['note'] = self.col_note_var.get()
             columns_config['time'] = self.col_time_var.get()
             columns_config['broker'] = self.col_broker_var.get()
             columns_config['symbol'] = self.col_symbol_var.get()
@@ -11478,45 +11014,39 @@ class PictureGalleryWindow:
     def complete_and_send(self):
         """Send all accepted screenshots to Google Sheets"""
         try:
-            # ✨ Lấy assignee từ dropdown
-            assignee = self.assigned_name_var.get().strip() if hasattr(self, 'assigned_name_var') else ''
-
-            # Confirm - khác nhau tùy trường hợp
-            count = len(self.accepted_screenshots)
             if not self.accepted_screenshots:
-                # ✨ Trường hợp KHÔNG có ảnh - gửi "Không có kèo nào hôm nay"
-                confirm = messagebox.askyesno("Xác nhận",
-                                             f"Bạn chưa Accept ảnh nào.\n\n"
-                                             f"Gửi thông báo 'Không có kèo nào hôm nay' lên Google Sheets?\n\n"
-                                             f"Người gửi: {assignee or '(Chưa chọn)'}")
-            else:
-                # ✨ Trường hợp CÓ ảnh - gửi "Báo Cáo"
-                confirm = messagebox.askyesno("Xác nhận",
-                                             f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
-                                             f"Sau khi gửi thành công, list sẽ được xóa.")
-
+                messagebox.showinfo("Thông báo", "Chưa có ảnh nào được Accept!\n\nHãy click 'Accept' hoặc nhấn Enter trên các ảnh muốn gửi.")
+                self.window.grab_set()
+                return
+            
+            # Confirm
+            count = len(self.accepted_screenshots)
+            confirm = messagebox.askyesno("Xác nhận", 
+                                         f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
+                                         f"Sau khi gửi thành công, list sẽ được xóa.")
+            
             if not confirm:
                 self.window.grab_set()
                 return
-
+            
             # Show progress
             self.info_label.config(text="⏳ Đang gửi lên Google Sheets...")
             self.window.update()
-
-            # Push to Google Sheets (với assignee cho trường hợp không có ảnh)
-            success, message = push_to_google_sheets(self.accepted_screenshots, assignee=assignee)
-
+            
+            # Push to Google Sheets
+            success, message = push_to_google_sheets(self.accepted_screenshots)
+            
             if success:
                 messagebox.showinfo("Thành công", message)
                 # Clear accepted list after successful send
                 self.clear_accepted()
             else:
                 messagebox.showerror("Lỗi", message)
-
+            
             self.info_label.config(text="")
             self.window.grab_set()
             self.window.focus_force()
-
+        
         except Exception as e:
             logger.error(f"Error sending to Google Sheets: {e}")
             messagebox.showerror("Lỗi", f"Không thể gửi: {str(e)}")
@@ -12164,7 +11694,6 @@ def main():
     load_manual_hidden_delays()
     load_audio_settings()
     load_symbol_filter_settings()
-    load_broker_selection_settings()  # Load broker selection settings
     load_delay_settings()
     load_product_delay_settings()
     load_hidden_products()
@@ -12182,42 +11711,16 @@ def main():
 
     # Ensure pictures folder exists
     ensure_pictures_folder()
-
-    logger.info("📦 Creating GUI window...")
-
-    # Create root window for GUI
-    root = tk.Tk()
-    root.withdraw()  # Hide main window temporarily
-
-    logger.info("🔍 Showing Broker Selection Dialog...")
-
-    # Show broker selection dialog at startup
-    dialog = BrokerSelectionDialog(root)
-    selected_brokers = dialog.show()
-
-    logger.info(f"✅ Broker selection completed")
-
-    # Save selected brokers if user confirmed
-    if selected_brokers is not None:
-        broker_selection_settings['enabled_brokers'] = selected_brokers
-        save_broker_selection_settings()
-        logger.info(f"User selected {len(selected_brokers)} brokers: {selected_brokers}")
-    else:
-        logger.info("User cancelled broker selection, using existing settings")
-
-    logger.info("🚀 Initializing main window...")
-
-    # Show main window
-    root.deiconify()
-
+    
     # Start Flask server in background thread
     flask_thread = threading.Thread(target=run_flask_server, daemon=True)
     flask_thread.start()
-
+    
     logger.info(f"Flask server started on http://{HTTP_HOST}:{HTTP_PORT}")
     logger.info(f"EA should send data to: http://127.0.0.1:{HTTP_PORT}/api/receive_data")
-
+    
     # Start GUI
+    root = tk.Tk()
     app_gui = GapSpikeDetectorGUI(root)
     
     # Log initial message
