@@ -12183,13 +12183,19 @@ def main():
     # Ensure pictures folder exists
     ensure_pictures_folder()
 
+    logger.info("📦 Creating GUI window...")
+
     # Create root window for GUI
     root = tk.Tk()
     root.withdraw()  # Hide main window temporarily
 
+    logger.info("🔍 Showing Broker Selection Dialog...")
+
     # Show broker selection dialog at startup
     dialog = BrokerSelectionDialog(root)
     selected_brokers = dialog.show()
+
+    logger.info(f"✅ Broker selection completed")
 
     # Save selected brokers if user confirmed
     if selected_brokers is not None:
@@ -12198,6 +12204,8 @@ def main():
         logger.info(f"User selected {len(selected_brokers)} brokers: {selected_brokers}")
     else:
         logger.info("User cancelled broker selection, using existing settings")
+
+    logger.info("🚀 Initializing main window...")
 
     # Show main window
     root.deiconify()
