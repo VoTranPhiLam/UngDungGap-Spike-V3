@@ -2171,12 +2171,22 @@ def capture_chart_screenshot(broker, symbol, detection_type, gap_info=None, spik
         # Title with detection info
         title_parts = [f'{broker} - {symbol}']
         if gap_info and gap_info.get('detected'):
-            gap_pct = gap_info.get('percentage', 0)
+            # ✨ Fix: Hỗ trợ cả percent-based ('percentage') và point-based ('point_gap')
+            gap_pct = gap_info.get('percentage')
+            if gap_pct is None:
+                # Point-based: dùng default_gap_percent từ config
+                gap_pct = gap_info.get('default_gap_percent', 0)
             gap_dir = gap_info.get('direction', '').upper()
             title_parts.append(f'GAP {gap_dir}: {gap_pct:.3f}%')
         if spike_info and spike_info.get('detected'):
-            spike_pct = spike_info.get('strength', 0)
-            spike_type = spike_info.get('spike_type', '')
+            # ✨ Fix: Hỗ trợ cả percent-based ('strength') và point-based ('spike_point')
+            spike_pct = spike_info.get('strength')
+            if spike_pct is None:
+                # Point-based: dùng default_gap_percent từ config (spike dùng chung threshold với gap)
+                spike_pct = spike_info.get('default_gap_percent', 0)
+            spike_type = spike_info.get('spike_type', '').upper()
+            if not spike_type:
+                spike_type = 'DETECTED'
             title_parts.append(f'SPIKE {spike_type}: {spike_pct:.3f}%')
         
         ax.set_title(' | '.join(title_parts), color='white', fontsize=14, fontweight='bold')
@@ -2224,18 +2234,34 @@ def capture_chart_screenshot(broker, symbol, detection_type, gap_info=None, spik
 
         # Save metadata for later export (Accept → Google Sheets)
         try:
+            # ✨ Fix: Lưu percentage cho cả percent-based và point-based
+            gap_percentage_value = None
+            if gap_info:
+                gap_percentage_value = gap_info.get('percentage')
+                if gap_percentage_value is None:
+                    # Point-based: dùng default_gap_percent từ config
+                    gap_percentage_value = gap_info.get('default_gap_percent')
+
             gap_meta = {
                 'detected': bool(gap_info.get('detected')) if gap_info else False,
                 'direction': gap_info.get('direction') if gap_info else None,
-                'percentage': float(gap_info.get('percentage')) if gap_info and gap_info.get('percentage') is not None else None,
+                'percentage': float(gap_percentage_value) if gap_percentage_value is not None else None,
                 'message': gap_info.get('message') if gap_info else '',
                 'threshold': gap_info.get('threshold') if gap_info else None
             }
 
+            # ✨ Fix: Lưu strength cho cả percent-based và point-based
+            spike_strength_value = None
+            if spike_info:
+                spike_strength_value = spike_info.get('strength')
+                if spike_strength_value is None:
+                    # Point-based: dùng default_gap_percent từ config (spike dùng chung threshold với gap)
+                    spike_strength_value = spike_info.get('default_gap_percent')
+
             spike_meta = {
                 'detected': bool(spike_info.get('detected')) if spike_info else False,
                 'spike_type': spike_info.get('spike_type') if spike_info else None,
-                'strength': float(spike_info.get('strength')) if spike_info and spike_info.get('strength') is not None else None,
+                'strength': float(spike_strength_value) if spike_strength_value is not None else None,
                 'message': spike_info.get('message') if spike_info else '',
                 'threshold': spike_info.get('threshold') if spike_info else None
             }
