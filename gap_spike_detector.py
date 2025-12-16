@@ -10659,7 +10659,7 @@ class PictureGalleryWindow:
                                               font=('Arial', 10, 'bold'))
         self.accepted_count_label.pack(side=tk.LEFT, padx=10)
         
-        ttk.Button(complete_frame, text="📊 Hoàn thành - Gửi lên Google Sheets", 
+        ttk.Button(complete_frame, text="📊 Hoàn thành - Chấm Công",
                   command=self.complete_and_send,
                   style='Accent.TButton').pack(side=tk.RIGHT, padx=5)
         
