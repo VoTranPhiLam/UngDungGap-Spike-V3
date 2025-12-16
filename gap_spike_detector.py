@@ -1076,42 +1076,15 @@ def push_to_google_sheets(accepted_items, assignee=None):
         # ✨ Lấy thời gian gửi (local time khi bấm hoàn thành)
         send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # Build row data based on column mapping
-        columns = auto_send_settings.get('columns', {})
-        rows = []
+        # ✨ LOGIC CHÍNH:
+        # - Nếu CÓ ảnh: Gửi tới CẢ 2 sheets (sheet chính + sheet điểm danh)
+        # - Nếu KHÔNG có ảnh: CHỈ gửi tới sheet điểm danh
 
-        if not accepted_items:
-            # ✨ Trường hợp KHÔNG có kèo - gửi 1 dòng duy nhất
-            # Lấy assignee từ tham số hoặc từ screenshot_settings
-            if not assignee:
-                assignee = screenshot_settings.get('assigned_name', '')
+        if accepted_items:
+            # ✨ Trường hợp CÓ kèo - gửi dữ liệu tới SHEET CHÍNH
+            columns = auto_send_settings.get('columns', {})
+            rows = []
 
-            row = []
-            if columns.get('assignee', True):
-                row.append(assignee)
-
-            if columns.get('send_time', True):
-                row.append(send_time)
-
-            if columns.get('note', True):
-                row.append('KÉO SÀN')
-
-            # Các cột còn lại để trống
-            if columns.get('time', True):
-                row.append('')
-            if columns.get('broker', True):
-                row.append('')
-            if columns.get('symbol', True):
-                row.append('')
-            if columns.get('type', True):
-                row.append('')
-            if columns.get('percentage', True):
-                row.append('')
-
-            rows.append(row)
-            logger.info(f"No screenshots - sending 'KÉO SÀN' message for {assignee}")
-        else:
-            # ✨ Trường hợp CÓ kèo - gửi từng dòng với Note = "KÉO SÀN"
             for item in accepted_items:
                 row = []
 
@@ -1145,10 +1118,14 @@ def push_to_google_sheets(accepted_items, assignee=None):
                     row.append(item.get('percentage', ''))
 
                 rows.append(row)
-        
-        # Append all rows at once (more efficient)
-        logger.info(f"Appending {len(rows)} rows to sheet...")
-        sheet.append_rows(rows)
+
+            # Append all rows at once to main sheet (more efficient)
+            logger.info(f"Appending {len(rows)} rows to main sheet...")
+            sheet.append_rows(rows)
+        else:
+            # ✨ Trường hợp KHÔNG có kèo - KHÔNG gửi tới sheet chính
+            logger.info(f"No screenshots - skipping main sheet, will only send to attendance sheet")
+
 
         # ✨ GỬI THÊM 1 DÒNG DUY NHẤT TỚI SHEET "ĐIỂM DANH"
         try:
@@ -1179,11 +1156,13 @@ def push_to_google_sheets(accepted_items, assignee=None):
             logger.error(f"Error sending to attendance sheet: {e}")
 
         if not accepted_items:
-            logger.info(f"Successfully pushed 'KÉO SÀN' message to Google Sheets")
-            return True, f"✅ Đã gửi thông báo 'KÉO SÀN' lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
+            # Chỉ gửi điểm danh, không gửi dữ liệu kèo
+            logger.info(f"Successfully sent attendance record only (no screenshots)")
+            return True, f"✅ Đã gửi điểm danh lên sheet 'Điểm danh'!\n\n📊 Sheet: {spreadsheet.title}\n(Không gửi dữ liệu kèo vì không có ảnh)\n🔗 Link: {sheet_url}"
         else:
-            logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
-            return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
+            # Đã gửi cả dữ liệu kèo và điểm danh
+            logger.info(f"Successfully pushed {len(accepted_items)} items to main sheet + attendance")
+            return True, f"✅ Đã gửi {len(accepted_items)} ảnh lên Google Sheets!\n\n📊 Sheet chính: Dữ liệu kèo ({len(accepted_items)} dòng)\n📝 Sheet điểm danh: 1 dòng\n🔗 Link: {sheet_url}"
 
     except Exception as e:
         error_msg = f"Lỗi khi gửi lên Google Sheets: {str(e)}"
