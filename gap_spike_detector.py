@@ -159,6 +159,7 @@ auto_send_settings = {
     'enabled': False,  # Enable auto-send when screenshot is captured
     'sheet_url': '',  # Google Sheet URL (user will fill this)
     'sheet_name': '',  # Sheet tab name (e.g., "Sheet1", "Data")
+    'attendance_sheet_name': 'Điểm danh',  # ✨ Sheet tab cho điểm danh (mặc định: "Điểm danh")
     'start_column': 'A',  # Column to start writing data (e.g., A, B, C)
     'columns': {  # Column mapping - which data to send
         'assignee': True,
@@ -1149,6 +1150,34 @@ def push_to_google_sheets(accepted_items, assignee=None):
         logger.info(f"Appending {len(rows)} rows to sheet...")
         sheet.append_rows(rows)
 
+        # ✨ GỬI THÊM 1 DÒNG DUY NHẤT TỚI SHEET "ĐIỂM DANH"
+        try:
+            attendance_sheet_name = auto_send_settings.get('attendance_sheet_name', 'Điểm danh').strip()
+            if attendance_sheet_name:
+                try:
+                    attendance_sheet = spreadsheet.worksheet(attendance_sheet_name)
+
+                    # Lấy assignee - ưu tiên từ accepted_items, sau đó từ tham số, cuối cùng từ settings
+                    attendance_assignee = assignee
+                    if not attendance_assignee and accepted_items:
+                        # Lấy assignee từ item đầu tiên
+                        attendance_assignee = accepted_items[0].get('assigned_name', '')
+                    if not attendance_assignee:
+                        attendance_assignee = screenshot_settings.get('assigned_name', '')
+
+                    # Tạo dòng điểm danh: [Thời gian gửi, Tên người gửi, Note]
+                    attendance_row = [send_time, attendance_assignee, 'KÉO SÀN']
+
+                    # Gửi 1 dòng duy nhất tới sheet Điểm danh
+                    attendance_sheet.append_row(attendance_row)
+                    logger.info(f"Successfully pushed attendance to '{attendance_sheet_name}' sheet")
+                except Exception as attendance_err:
+                    # Không tìm thấy sheet Điểm danh - log warning nhưng vẫn thành công với sheet chính
+                    logger.warning(f"Không thể gửi tới sheet '{attendance_sheet_name}': {attendance_err}")
+        except Exception as e:
+            # Lỗi điểm danh không ảnh hưởng đến kết quả chính
+            logger.error(f"Error sending to attendance sheet: {e}")
+
         if not accepted_items:
             logger.info(f"Successfully pushed 'KÉO SÀN' message to Google Sheets")
             return True, f"✅ Đã gửi thông báo 'KÉO SÀN' lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
@@ -1893,6 +1922,9 @@ def load_auto_send_settings():
             for key, default_value in default_columns.items():
                 columns.setdefault(key, default_value)
             auto_send_settings['columns'] = columns
+
+            # ✨ Ensure attendance_sheet_name has default value
+            auto_send_settings.setdefault('attendance_sheet_name', 'Điểm danh')
 
             logger.info(f"Loaded auto-send settings: enabled={auto_send_settings['enabled']}")
         else:
@@ -8506,10 +8538,15 @@ Cách sử dụng:
         self.sheet_name_var = tk.StringVar(value=auto_send_settings['sheet_name'])
         ttk.Entry(url_frame, textvariable=self.sheet_name_var, width=30).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
 
-        ttk.Label(url_frame, text="Cột bắt đầu:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(url_frame, text="Sheet Điểm danh:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.attendance_sheet_name_var = tk.StringVar(value=auto_send_settings.get('attendance_sheet_name', 'Điểm danh'))
+        ttk.Entry(url_frame, textvariable=self.attendance_sheet_name_var, width=30).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(url_frame, text="(Sheet ghi điểm danh)", foreground='gray', font=('Arial', 8)).grid(row=2, column=1, padx=(200, 0), sticky=tk.W)
+
+        ttk.Label(url_frame, text="Cột bắt đầu:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
         self.start_column_var = tk.StringVar(value=auto_send_settings['start_column'])
-        ttk.Entry(url_frame, textvariable=self.start_column_var, width=5).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
-        ttk.Label(url_frame, text="(VD: A, B, C, ...)", foreground='gray', font=('Arial', 8)).grid(row=2, column=1, padx=(50, 0), sticky=tk.W)
+        ttk.Entry(url_frame, textvariable=self.start_column_var, width=5).grid(row=3, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(url_frame, text="(VD: A, B, C, ...)", foreground='gray', font=('Arial', 8)).grid(row=3, column=1, padx=(50, 0), sticky=tk.W)
 
         # Column mapping
         columns_frame = ttk.LabelFrame(auto_send_frame, text="📋 Cột cần gửi", padding="10")
@@ -8585,6 +8622,7 @@ Cách sử dụng:
             auto_send_settings['enabled'] = True  # Enable once configured
             auto_send_settings['sheet_url'] = sheet_url
             auto_send_settings['sheet_name'] = sheet_name
+            auto_send_settings['attendance_sheet_name'] = self.attendance_sheet_name_var.get().strip()
             auto_send_settings['start_column'] = start_column
 
             columns_config = auto_send_settings.setdefault('columns', {})
