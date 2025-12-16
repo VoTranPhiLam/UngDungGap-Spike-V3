@@ -646,9 +646,19 @@ def calculate_gap_point(symbol, broker, data, spread_percent=None):
             }
 
         # Calculate threshold in points
-        # ThresholdPoint = DEFAULT_GAP / PointDigits
-        default_gap_percent = config['default_gap_percent']
-        threshold_point = default_gap_percent / point_value
+        # ✨ PRIORITY: Check custom_thresholds first, then use config from file
+        key = f"{broker}_{symbol}"
+
+        # Check if user has set custom gap_point threshold in Bảng 1
+        if key in custom_thresholds and 'gap_point' in custom_thresholds[key]:
+            # Use custom threshold directly (already in points)
+            threshold_point = float(custom_thresholds[key]['gap_point'])
+            default_gap_percent = threshold_point * point_value  # Convert back for display
+        else:
+            # Use threshold from config file (txt)
+            # ThresholdPoint = DEFAULT_GAP / PointDigits
+            default_gap_percent = config['default_gap_percent']
+            threshold_point = default_gap_percent / point_value
 
         # Calculate point gap
         point_gap = abs(current_open - prev_close) / point_value
@@ -760,11 +770,21 @@ def calculate_spike_point(symbol, broker, data, spread_percent=None):
             }
 
         # Calculate threshold in points (same as gap threshold)
-        default_gap_percent = config['default_gap_percent']
-        threshold_point = default_gap_percent / point_value
+        # ✨ PRIORITY: Check custom_thresholds first, then use config from file
+        key = f"{broker}_{symbol}"
+
+        # Check if user has set custom spike_point threshold in Bảng 1
+        if key in custom_thresholds and 'spike_point' in custom_thresholds[key]:
+            # Use custom threshold directly (already in points)
+            threshold_point = float(custom_thresholds[key]['spike_point'])
+            default_gap_percent = threshold_point * point_value  # Convert back for display
+        else:
+            # Use threshold from config file (txt)
+            # ThresholdPoint = DEFAULT_GAP / PointDigits
+            default_gap_percent = config['default_gap_percent']
+            threshold_point = default_gap_percent / point_value
 
         # Track previous bid for this symbol
-        key = f"{broker}_{symbol}"
 
         if key not in bid_tracking:
             # First time - no previous bid
