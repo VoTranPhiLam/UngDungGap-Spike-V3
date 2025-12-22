@@ -10570,6 +10570,10 @@ class PictureGalleryWindow:
         self.filter_broker.pack(side=tk.LEFT, padx=5)
         self.filter_broker.bind('<<ComboboxSelected>>', lambda e: self.load_pictures())
 
+        # ✨ Sort button - Lọc theo broker + symbol
+        ttk.Button(filter_frame, text="📊 Lọc sản phẩm",
+                  command=self.sort_by_product).pack(side=tk.LEFT, padx=5)
+
         ttk.Label(filter_frame, text="Tên:").pack(side=tk.LEFT, padx=5)
         initial_name = screenshot_settings.get('assigned_name', '')
         name_choices = list(PICTURE_ASSIGNEE_CHOICES)
@@ -10604,11 +10608,13 @@ class PictureGalleryWindow:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # ✨ EXTENDED mode: Hỗ trợ Ctrl (chọn nhiều) và Shift (chọn range)
         self.image_listbox = tk.Listbox(list_frame, width=40, height=30,
-                                        yscrollcommand=scrollbar.set)
+                                        yscrollcommand=scrollbar.set,
+                                        selectmode=tk.EXTENDED)
         self.image_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.image_listbox.yview)
-        
+
         self.image_listbox.bind('<<ListboxSelect>>', self.on_image_select)
         
         # RIGHT: Image preview
@@ -10645,9 +10651,11 @@ class PictureGalleryWindow:
         
         accepted_scrollbar = ttk.Scrollbar(accepted_list_frame)
         accepted_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+
+        # ✨ EXTENDED mode: Cho phép chọn nhiều ảnh để xóa khỏi accepted list
         self.accepted_listbox = tk.Listbox(accepted_list_frame, height=4,
-                                           yscrollcommand=accepted_scrollbar.set)
+                                           yscrollcommand=accepted_scrollbar.set,
+                                           selectmode=tk.EXTENDED)
         self.accepted_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         accepted_scrollbar.config(command=self.accepted_listbox.yview)
         
@@ -10662,9 +10670,13 @@ class PictureGalleryWindow:
         ttk.Button(complete_frame, text="📊 Hoàn thành - Chấm Công",
                   command=self.complete_and_send,
                   style='Accent.TButton').pack(side=tk.RIGHT, padx=5)
-        
-        ttk.Button(complete_frame, text="🗑️ Clear Accepted", 
+
+        ttk.Button(complete_frame, text="🗑️ Clear Accepted",
                   command=self.clear_accepted).pack(side=tk.RIGHT, padx=5)
+
+        # ✨ Remove selected button - Xóa các ảnh đã chọn khỏi accepted list
+        ttk.Button(complete_frame, text="❌ Remove Selected",
+                  command=self.remove_selected_accepted).pack(side=tk.RIGHT, padx=5)
         
         # Info label
         self.info_label = ttk.Label(self.window, text="No screenshots yet", 
@@ -10857,49 +10869,83 @@ class PictureGalleryWindow:
                                    fill='red', font=('Arial', 12))
     
     def delete_selected(self):
-        """Delete selected screenshot - NO CONFIRM (direct delete)"""
+        """Delete selected screenshot(s) - Support multi-select with Ctrl/Shift"""
         try:
-            if not self.current_image_path:
-                # No warning, just ignore if nothing selected
+            # Get all selected indices
+            selected_indices = self.image_listbox.curselection()
+            if not selected_indices:
+                return  # No selection
+
+            # Get all files to delete
+            folder = screenshot_settings['folder']
+            pattern = os.path.join(folder, "*.png")
+            image_files = glob.glob(pattern)
+            image_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+
+            # Apply same filters as load_pictures
+            filter_type = self.filter_type_var.get()
+            filter_broker = self.filter_broker_var.get()
+
+            filtered_files = []
+            for filepath in image_files:
+                filename = os.path.basename(filepath)
+                if filter_type != "All":
+                    if f"_{filter_type}_" not in filename:
+                        continue
+                if filter_broker != "All":
+                    if not filename.startswith(filter_broker + "_"):
+                        continue
+                filtered_files.append(filepath)
+
+            # Get files to delete
+            files_to_delete = []
+            for index in selected_indices:
+                if index < len(filtered_files):
+                    files_to_delete.append(filtered_files[index])
+
+            if not files_to_delete:
                 return
-            
-            # Get current selection index
-            current_selection = self.image_listbox.curselection()
-            current_index = current_selection[0] if current_selection else 0
-            
-            # Delete file directly - NO CONFIRM
-            os.remove(self.current_image_path)
-            logger.info(f"Deleted screenshot: {self.current_image_path}")
-            
+
+            # Delete all selected files
+            deleted_count = 0
+            for filepath in files_to_delete:
+                try:
+                    os.remove(filepath)
+                    # Also delete metadata file if exists
+                    metadata_path = os.path.splitext(filepath)[0] + '.json'
+                    if os.path.exists(metadata_path):
+                        os.remove(metadata_path)
+                    deleted_count += 1
+                    logger.info(f"Deleted screenshot: {filepath}")
+                except Exception as del_err:
+                    logger.error(f"Error deleting {filepath}: {del_err}")
+
             # Clear display
             self.canvas.delete("all")
             self.current_image = None
             self.current_image_path = None
-            
+
             # Reload list
             self.load_pictures()
-            
-            # Auto-select next image (or previous if last was deleted)
+
+            # Auto-select next image
             total_items = self.image_listbox.size()
             if total_items > 0:
-                # If current index still exists, select it (next image took its place)
-                # Otherwise select last item
-                new_index = min(current_index, total_items - 1)
+                first_index = selected_indices[0]
+                new_index = min(first_index, total_items - 1)
                 self.image_listbox.selection_clear(0, tk.END)
                 self.image_listbox.selection_set(new_index)
                 self.image_listbox.activate(new_index)
                 self.image_listbox.see(new_index)
-                # Trigger selection event to display the image
                 self.on_image_select(None)
             else:
-                # No more images
                 self.info_label.config(text="Không còn screenshot nào")
-        
+
+            logger.info(f"Deleted {deleted_count} screenshot(s)")
+
         except Exception as e:
-            logger.error(f"Error deleting image: {e}")
-            # Show error but keep focus on this window
+            logger.error(f"Error deleting images: {e}")
             messagebox.showerror("Lỗi", f"Không thể xóa hình: {str(e)}")
-            # Re-grab focus after messagebox
             self.window.grab_set()
             self.window.focus_force()
     
@@ -11128,7 +11174,106 @@ class PictureGalleryWindow:
         self.accepted_screenshots.clear()
         self.update_accepted_display()
         logger.info("Cleared accepted screenshots")
-    
+
+    def remove_selected_accepted(self):
+        """Remove selected items from accepted list"""
+        try:
+            selected_indices = self.accepted_listbox.curselection()
+            if not selected_indices:
+                return  # No selection
+
+            # Remove items in reverse order (to avoid index shifting)
+            for index in reversed(selected_indices):
+                if index < len(self.accepted_screenshots):
+                    removed_item = self.accepted_screenshots.pop(index)
+                    logger.info(f"Removed from accepted: {removed_item.get('filename', 'Unknown')}")
+
+            # Update display
+            self.update_accepted_display()
+            logger.info(f"Removed {len(selected_indices)} item(s) from accepted list")
+
+        except Exception as e:
+            logger.error(f"Error removing accepted items: {e}")
+
+    def sort_by_product(self):
+        """Sort screenshots by broker name then symbol name"""
+        try:
+            # Get pictures folder
+            folder = screenshot_settings['folder']
+            if not os.path.exists(folder):
+                return
+
+            # Get all PNG files
+            pattern = os.path.join(folder, "*.png")
+            image_files = glob.glob(pattern)
+
+            # Apply filters
+            filter_type = self.filter_type_var.get()
+            filter_broker = self.filter_broker_var.get()
+
+            filtered_files = []
+            for filepath in image_files:
+                filename = os.path.basename(filepath)
+
+                # Filter by type
+                if filter_type != "All":
+                    if f"_{filter_type}_" not in filename:
+                        continue
+
+                # Filter by broker
+                if filter_broker != "All":
+                    if not filename.startswith(filter_broker + "_"):
+                        continue
+
+                filtered_files.append(filepath)
+
+            # Sort by broker + symbol
+            def get_broker_symbol(filepath):
+                filename = os.path.basename(filepath)
+                parts = filename.replace('.png', '').split('_')
+                if len(parts) >= 2:
+                    broker = parts[0]
+                    symbol = parts[1]
+                    return (broker, symbol)
+                return ('', '')
+
+            filtered_files.sort(key=get_broker_symbol)
+
+            # Rebuild listbox with sorted order
+            self.image_listbox.delete(0, tk.END)
+
+            for filepath in filtered_files:
+                filename = os.path.basename(filepath)
+                parts = filename.replace('.png', '').split('_')
+
+                if len(parts) >= 4:
+                    broker = parts[0]
+                    symbol = parts[1]
+                    detection_type = parts[2]
+                    timestamp_str = '_'.join(parts[3:])
+
+                    # Format display
+                    try:
+                        dt = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                        time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        time_str = timestamp_str
+
+                    display = f"[Server] {time_str} | {broker} {symbol} | {detection_type.upper()}"
+                    self.image_listbox.insert(tk.END, display)
+                else:
+                    # Fallback
+                    self.image_listbox.insert(tk.END, filename)
+
+            # Update info
+            self.info_label.config(text=f"Sorted by product: {len(filtered_files)} screenshots")
+            logger.info(f"Sorted {len(filtered_files)} screenshots by broker + symbol")
+
+        except Exception as e:
+            logger.error(f"Error sorting by product: {e}")
+            messagebox.showerror("Lỗi", f"Không thể sắp xếp: {str(e)}")
+            self.window.grab_set()
+
     def complete_and_send(self):
         """Send all accepted screenshots to Google Sheets"""
         try:
