@@ -10658,6 +10658,10 @@ class PictureGalleryWindow:
                                            selectmode=tk.EXTENDED)
         self.accepted_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         accepted_scrollbar.config(command=self.accepted_listbox.yview)
+
+        # ✨ Bind Delete key cho accepted list
+        self.accepted_listbox.bind('<Delete>', lambda e: self.remove_selected_accepted())
+        self.accepted_listbox.bind('<KeyPress-Delete>', lambda e: self.remove_selected_accepted())
         
         # Complete button
         complete_frame = ttk.Frame(accepted_frame)
