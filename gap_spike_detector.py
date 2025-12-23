@@ -4270,6 +4270,12 @@ class GapSpikeDetectorGUI:
             gap_detected = gap_info.get('detected', False)
             spike_detected = spike_info.get('detected', False)
 
+            # ✨ Apply filters (same as Bảng 2)
+            if self.filter_gap_only.get() and not gap_detected:
+                continue
+            if self.filter_spike_only.get() and not spike_detected:
+                continue
+
             # Get values
             default_gap_percent = gap_info.get('default_gap_percent', 0)
             threshold_point = gap_info.get('threshold_point', 0)
