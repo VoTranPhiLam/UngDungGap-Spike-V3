@@ -10519,7 +10519,18 @@ class PictureGalleryWindow:
         self.main_app = main_app
         self.window = tk.Toplevel(parent)
         self.window.title("📸 Picture Gallery - Gap & Spike Screenshots")
-        self.window.geometry("1200x800")
+
+        # ✨ Set window size to 3/4 of screen
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        window_width = int(screen_width * 0.75)
+        window_height = int(screen_height * 0.75)
+
+        # Center the window
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+
+        self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
@@ -10609,7 +10620,8 @@ class PictureGalleryWindow:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # ✨ EXTENDED mode: Hỗ trợ Ctrl (chọn nhiều) và Shift (chọn range)
-        self.image_listbox = tk.Listbox(list_frame, width=40, height=30,
+        # ✨ Increased width from 40 to 70 for better visibility
+        self.image_listbox = tk.Listbox(list_frame, width=70, height=30,
                                         yscrollcommand=scrollbar.set,
                                         selectmode=tk.EXTENDED)
         self.image_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -10767,8 +10779,9 @@ class PictureGalleryWindow:
                         time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
                     except:
                         time_str = timestamp_str
-                    
-                    display = f"[Server] {time_str} | {broker} {symbol} | {detection_type.upper()}"
+
+                    # ✨ Removed "[Server]" prefix for cleaner display
+                    display = f"{time_str} | {broker} {symbol} | {detection_type.upper()}"
                     self.image_listbox.insert(tk.END, display)
                 else:
                     # Fallback
@@ -11263,7 +11276,8 @@ class PictureGalleryWindow:
                     except:
                         time_str = timestamp_str
 
-                    display = f"[Server] {time_str} | {broker} {symbol} | {detection_type.upper()}"
+                    # ✨ Removed "[Server]" prefix for cleaner display
+                    display = f"{time_str} | {broker} {symbol} | {detection_type.upper()}"
                     self.image_listbox.insert(tk.END, display)
                 else:
                     # Fallback
