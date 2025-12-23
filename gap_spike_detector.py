@@ -4091,18 +4091,45 @@ class GapSpikeDetectorGUI:
             gap_detected = gap_info.get('detected', False)
             spike_detected = spike_info.get('detected', False)
 
-            gap_pct = gap_info.get('percentage', 0)
-            spike_pct = spike_info.get('strength', 0)
+            # ✨ FIX: Hiển thị giá trị thực tế (percent hoặc point) thay vì chỉ ngưỡng
+            # Check if this is point-based or percent-based
+            is_point_based_gap = 'point_gap' in gap_info
+            is_point_based_spike = 'spike_point' in spike_info
 
-            # Get thresholds
-            gap_threshold = get_threshold(broker, symbol, 'gap')
-            spike_threshold = get_threshold(broker, symbol, 'spike')
+            # Gap value display
+            if is_point_based_gap:
+                # Point-based gap: hiển thị point
+                gap_value = gap_info.get('point_gap', 0)
+                gap_pct_str = f"{gap_value:.1f} pt" if gap_detected else "-"
+            else:
+                # Percent-based gap: hiển thị phần trăm
+                gap_pct = gap_info.get('percentage', 0)
+                gap_pct_str = f"{gap_pct:.3f}%" if gap_detected else "-"
 
-            # Format display
-            gap_pct_str = f"{gap_pct:.3f}%" if gap_detected else "-"
-            spike_pct_str = f"{spike_pct:.3f}%" if spike_detected else "-"
-            gap_threshold_str = f"{gap_threshold:.3f}%" if gap_detected else "-"
-            spike_threshold_str = f"{spike_threshold:.3f}%" if spike_detected else "-"
+            # Spike value display
+            if is_point_based_spike:
+                # Point-based spike: hiển thị point
+                spike_value = spike_info.get('spike_point', 0)
+                spike_pct_str = f"{spike_value:.1f} pt" if spike_detected else "-"
+            else:
+                # Percent-based spike: hiển thị phần trăm
+                spike_pct = spike_info.get('strength', 0)
+                spike_pct_str = f"{spike_pct:.3f}%" if spike_detected else "-"
+
+            # Get thresholds for display
+            if is_point_based_gap:
+                gap_threshold_value = gap_info.get('threshold_point', 0)
+                gap_threshold_str = f"{gap_threshold_value:.1f} pt" if gap_detected else "-"
+            else:
+                gap_threshold = get_threshold(broker, symbol, 'gap')
+                gap_threshold_str = f"{gap_threshold:.3f}%" if gap_detected else "-"
+
+            if is_point_based_spike:
+                spike_threshold_value = spike_info.get('threshold_point', 0)
+                spike_threshold_str = f"{spike_threshold_value:.1f} pt" if spike_detected else "-"
+            else:
+                spike_threshold = get_threshold(broker, symbol, 'spike')
+                spike_threshold_str = f"{spike_threshold:.3f}%" if spike_detected else "-"
 
             # Determine alert type
             alert_type_parts = []
