@@ -180,11 +180,31 @@ python_reset_settings = {
 
 PYTHON_RESET_SETTINGS_FILE = 'python_reset_settings.json'
 
+# ===================== HELPER FUNCTIONS FOR FILE PATHS =====================
+def get_application_path():
+    """
+    ✨ Get the directory where the application (exe or .py) is located.
+    - When running as PyInstaller exe: Returns the directory of the exe file
+    - When running as Python script: Returns the directory of the script
+
+    This ensures credentials.json stays OUTSIDE the exe for easy modification.
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller exe
+        # sys.executable is the path to the exe
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as Python script
+        return os.path.dirname(os.path.abspath(__file__))
+
 # Google Sheets integration
 accepted_screenshots = []  # List of accepted screenshots to send to Google Sheets
 GOOGLE_SHEET_NAME = "Chấm công TestSanPython"  # Name of the Google Sheet
-CREDENTIALS_FILE = "credentials.json"  # Google service account credentials
-SHEET_ID_CACHE_FILE = "sheet_id_cache.json"  # Cache sheet ID to reuse (avoid creating duplicates)
+
+# ✨ CREDENTIALS_FILE will be looked for NEXT TO the exe (not bundled inside)
+# This allows users to modify credentials.json without rebuilding the exe
+CREDENTIALS_FILE = os.path.join(get_application_path(), "credentials.json")
+SHEET_ID_CACHE_FILE = os.path.join(get_application_path(), "sheet_id_cache.json")
 
 data_lock = threading.Lock()
 
