@@ -843,15 +843,23 @@ def calculate_gap_point(symbol, broker, data, spread_percent=None):
         # Calculate point gap
         point_gap = abs(current_open - prev_close) / point_value
 
+        # ✨ Calculate spread in points
+        spread_point = abs(current_ask - current_bid) / point_value
+
         # Determine direction
         if current_open > prev_close:
             direction = 'up'
-            # Gap Up condition: pointGap >= ThresholdPoint
-            detected = point_gap >= threshold_point
+            # ✨ Gap Up condition: pointGap >= ThresholdPoint AND pointGap > spread
+            gap_up_threshold_met = point_gap >= threshold_point
+            gap_up_spread_met = point_gap > spread_point
+            detected = gap_up_threshold_met and gap_up_spread_met
         elif current_open < prev_close:
             direction = 'down'
-            # Gap Down condition: pointGap >= ThresholdPoint AND Ask < Close_prev
-            detected = (point_gap >= threshold_point) and (current_ask < prev_close)
+            # ✨ Gap Down condition: pointGap >= ThresholdPoint AND Ask < Close_prev AND pointGap > spread
+            gap_down_threshold_met = point_gap >= threshold_point
+            gap_down_ask_valid = current_ask < prev_close
+            gap_down_spread_met = point_gap > spread_point
+            detected = gap_down_threshold_met and gap_down_ask_valid and gap_down_spread_met
         else:
             direction = 'none'
             detected = False
@@ -862,17 +870,25 @@ def calculate_gap_point(symbol, broker, data, spread_percent=None):
                 message = (
                     f"GAP UP (Point): {point_gap:.1f} points "
                     f"(Open: {current_open:.5f}, Close_prev: {prev_close:.5f}, "
-                    f"ngưỡng: {threshold_point:.1f} points / {default_gap_percent}%)"
+                    f"ngưỡng: {threshold_point:.1f} points / spread: {spread_point:.1f} points)"
                 )
             else:
                 message = (
                     f"GAP DOWN (Point): {point_gap:.1f} points "
                     f"(Open: {current_open:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}, "
-                    f"ngưỡng: {threshold_point:.1f} points / {default_gap_percent}%)"
+                    f"ngưỡng: {threshold_point:.1f} points / spread: {spread_point:.1f} points)"
                 )
         else:
-            if direction == 'down' and point_gap >= threshold_point:
-                message = f"Gap Down: {point_gap:.1f} points (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+            if direction == 'up' and gap_up_threshold_met and not gap_up_spread_met:
+                message = f"Gap Up: {point_gap:.1f} points <= Spread {spread_point:.1f} points - Không hợp lệ"
+            elif direction == 'down' and gap_down_threshold_met:
+                # Gap down vượt ngưỡng nhưng không hợp lệ
+                if not gap_down_ask_valid:
+                    message = f"Gap Down: {point_gap:.1f} points (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+                elif not gap_down_spread_met:
+                    message = f"Gap Down: {point_gap:.1f} points <= Spread {spread_point:.1f} points - Không hợp lệ"
+                else:
+                    message = f"Gap Down: {point_gap:.1f} points - Không hợp lệ"
             else:
                 message = f"Gap: {point_gap:.1f} points"
 
@@ -983,18 +999,27 @@ def calculate_spike_point(symbol, broker, data, spread_percent=None):
         # Calculate spike in points
         spike_point = abs(current_bid - prev_bid) / point_value
 
-        # Detect spike
-        detected = spike_point >= threshold_point
+        # ✨ Calculate spread in points
+        current_ask = float(data.get('ask', 0))
+        spread_point = abs(current_ask - current_bid) / point_value
+
+        # ✨ Detect spike: Must exceed threshold AND spread
+        spike_threshold_met = spike_point >= threshold_point
+        spike_spread_met = spike_point > spread_point
+        detected = spike_threshold_met and spike_spread_met
 
         # Build message
         if detected:
             message = (
                 f"SPIKE (Point): {spike_point:.1f} points "
                 f"(Bid: {current_bid:.5f}, Bid_prev: {prev_bid:.5f}, "
-                f"ngưỡng: {threshold_point:.1f} points / {default_gap_percent}%)"
+                f"ngưỡng: {threshold_point:.1f} points / spread: {spread_point:.1f} points)"
             )
         else:
-            message = f"Spike: {spike_point:.1f} points"
+            if spike_threshold_met and not spike_spread_met:
+                message = f"Spike: {spike_point:.1f} points <= Spread {spread_point:.1f} points - Không hợp lệ"
+            else:
+                message = f"Spike: {spike_point:.1f} points"
 
         result = {
             'detected': detected,
@@ -2835,8 +2860,11 @@ def calculate_gap(symbol, broker, data, spread_percent=None):
         if direction == 'up':
             detected = gap_up_threshold_met and gap_up_spread_met
         elif direction == 'down':
-            # Gap Down: Kiểm tra % VÀ Ask < Close_prev
-            detected = (gap_percentage_abs >= gap_threshold) and (current_ask < prev_close)
+            # ✨ Gap Down: Kiểm tra % VÀ Ask < Close_prev VÀ gap > spread
+            gap_down_threshold_met = gap_percentage_abs >= gap_threshold
+            gap_down_ask_valid = current_ask < prev_close
+            gap_down_spread_met = gap_percentage_abs > spread_percent
+            detected = gap_down_threshold_met and gap_down_ask_valid and gap_down_spread_met
         else:
             # No gap
             detected = False
@@ -2846,7 +2874,7 @@ def calculate_gap(symbol, broker, data, spread_percent=None):
             if direction == 'down':
                 message = (
                     f"GAP DOWN: {gap_percentage_abs:.3f}% (Open: {current_open:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}, "
-                    f"ngưỡng: {gap_threshold}%)"
+                    f"ngưỡng: {gap_threshold}% / spread: {spread_percent:.3f}%)"
                 )
             else:
                 message = (
@@ -2858,8 +2886,14 @@ def calculate_gap(symbol, broker, data, spread_percent=None):
                 message = (
                     f"Gap Up: {gap_percentage_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
                 )
-            elif direction == 'down' and gap_percentage_abs >= gap_threshold and current_ask >= prev_close:
-                message = f"Gap Down: {gap_percentage_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+            elif direction == 'down' and gap_percentage_abs >= gap_threshold:
+                # Gap down vượt ngưỡng nhưng không hợp lệ
+                if current_ask >= prev_close:
+                    message = f"Gap Down: {gap_percentage_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+                elif gap_percentage_abs <= spread_percent:
+                    message = f"Gap Down: {gap_percentage_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
+                else:
+                    message = f"Gap Down: {gap_percentage_abs:.3f}% - Không hợp lệ"
             else:
                 message = f"Gap: {gap_percentage_abs:.3f}%"
         
@@ -2951,10 +2985,13 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
         spike_up_threshold_met = spike_up_abs >= spike_threshold
         spike_up_spread_met = spike_up_abs > spread_percent
         spike_up_detected = spike_up_threshold_met and spike_up_spread_met
-        
-        # Kiểm tra spike down với điều kiện BỔ SUNG: Ask < Close_prev
-        spike_down_detected = (spike_down_abs >= spike_threshold) and (current_ask < prev_close)
-        
+
+        # ✨ Kiểm tra spike down với điều kiện: Ask < Close_prev VÀ spike > spread
+        spike_down_threshold_met = spike_down_abs >= spike_threshold
+        spike_down_ask_valid = current_ask < prev_close
+        spike_down_spread_met = spike_down_abs > spread_percent
+        spike_down_detected = spike_down_threshold_met and spike_down_ask_valid and spike_down_spread_met
+
         detected = spike_up_detected or spike_down_detected
         
         # Xác định spike mạnh nhất và hướng
@@ -2980,7 +3017,7 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
             spike_type = "DOWN"
             spike_value = spike_down
             spike_abs = spike_down_abs
-            price_detail = f"Low: {current_low:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}"
+            price_detail = f"Low: {current_low:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}, Spread: {spread_percent:.3f}%"
         else:
             # Không detected → Chọn spike lớn hơn để hiển thị
             if spike_up_abs > spike_down_abs:
@@ -2998,6 +3035,8 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
                 # Hiển thị lý do không detected
                 if current_ask >= prev_close:
                     price_detail = f"Low: {current_low:.5f}, Ask: {current_ask:.5f} >= Close_prev: {prev_close:.5f} (Không hợp lệ)"
+                elif spike_down_threshold_met and not spike_down_spread_met:
+                    price_detail = f"Low: {current_low:.5f}, Spread {spread_percent:.3f}% >= Spike"
                 else:
                     price_detail = f"Low: {current_low:.5f}"
         
@@ -3006,10 +3045,14 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
         else:
             if spike_up_threshold_met and not spike_up_spread_met:
                 message = f"Spike Up: {spike_up_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
-            elif spike_down_abs >= spike_threshold and current_ask >= prev_close:
-                message = (
-                    f"Spike Down: {spike_down_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
-                )
+            elif spike_down_threshold_met:
+                # Spike down vượt ngưỡng nhưng không hợp lệ
+                if current_ask >= prev_close:
+                    message = f"Spike Down: {spike_down_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+                elif not spike_down_spread_met:
+                    message = f"Spike Down: {spike_down_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
+                else:
+                    message = f"Spike Down: {spike_down_abs:.3f}% - Không hợp lệ"
             else:
                 message = f"Spike: Up {spike_up_abs:.3f}% / Down {spike_down_abs:.3f}%"
 
