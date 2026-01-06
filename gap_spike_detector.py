@@ -670,12 +670,35 @@ def find_symbol_config(symbol):
     # Bước 2: Thử prefix match (O(n) where n = số aliases)
     # Tìm alias dài nhất là prefix của symbol để tránh false positive
     # Ví dụ: BTCUSDM nên match BTCUSD chứ không phải BTC
+    # ✨ QUAN TRỌNG: Áp dụng điều kiện độ dài để tránh match nhầm
     best_match = None
     best_match_len = 0
     best_matched_alias = None
 
     for alias_lower, symbol_chuan in gap_config_reverse_map.items():
         if symbol_lower.startswith(alias_lower):
+            # ✨ ĐIỀU KIỆN ĐỘ DÀI (giống như Bước 3):
+            # - Alias <= 2 ký tự CHỈ match với symbol CHÍNH XÁC 2 ký tự
+            # - Alias <= 4 ký tự CHỉ match với symbol <= 4 ký tự
+            # - Symbol > 4 ký tự KHÔNG match với alias < 4 ký tự
+            len_symbol = len(symbol_lower)
+            len_alias = len(alias_lower)
+
+            # ✨ Alias 2 ký tự CHỈ match symbol 2 ký tự (EXACT length match)
+            # Ví dụ: SI (2 chars) CHỈ match SI, KHÔNG match SIGUS
+            if len_alias <= 2:
+                if len_symbol != len_alias:
+                    continue  # Skip - không match
+            # ✨ Alias 3-4 ký tự chỉ match symbol <= 4 ký tự
+            elif len_alias <= 4:
+                if len_symbol > 4:
+                    continue  # Skip - không match
+            # ✨ Symbol dài (>4) không match với alias ngắn (<4)
+            else:
+                if len_symbol > 4 and len_alias < 4:
+                    continue  # Skip - không match
+
+            # Nếu pass được điều kiện độ dài, tìm alias dài nhất
             if len(alias_lower) > best_match_len:
                 best_match = symbol_chuan
                 best_match_len = len(alias_lower)
