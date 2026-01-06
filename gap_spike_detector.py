@@ -7245,14 +7245,27 @@ class SettingsWindow:
         y = (screen_height - window_height) // 2
 
         self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
+
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
         self.window.grab_set()  # Chặn input đến parent window
-        
+
         self.window.lift()  # Đưa cửa sổ lên trên
         self.window.focus_force()  # Focus vào cửa sổ
-        
+
+        # ✨ Top control frame with maximize button
+        top_control_frame = ttk.Frame(self.window)
+        top_control_frame.pack(fill=tk.X, padx=10, pady=(5, 0))
+
+        # ✨ Maximize/Restore button
+        self.is_maximized = False
+        self.maximize_button = ttk.Button(
+            top_control_frame,
+            text="🔲 Phóng to toàn màn hình",
+            command=self.toggle_maximize
+        )
+        self.maximize_button.pack(side=tk.RIGHT, padx=5)
+
         # Notebook for tabs
         self.notebook = ttk.Notebook(self.window)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -8721,30 +8734,6 @@ Cách sử dụng:
                   command=self.refresh_statistics,
                   width=25).pack(anchor=tk.W, pady=10)
 
-        # Trading Hours section
-        trading_hours_section = ttk.LabelFrame(tools_frame, text="📅 Giờ giao dịch", padding="20")
-        trading_hours_section.pack(fill=tk.X, pady=10)
-
-        ttk.Label(trading_hours_section,
-                 text="Xem giờ trade của các symbols từ các sàn",
-                 foreground='blue').pack(anchor=tk.W, pady=5)
-
-        ttk.Button(trading_hours_section, text="📅 Mở giờ giao dịch",
-                  command=self.main_app.open_trading_hours,
-                  width=30).pack(anchor=tk.W, pady=5)
-
-        # Raw Data section
-        raw_data_section = ttk.LabelFrame(tools_frame, text="📊 Xem dữ liệu thô", padding="20")
-        raw_data_section.pack(fill=tk.X, pady=10)
-
-        ttk.Label(raw_data_section,
-                 text="Xem raw data từ MT4/MT5 (giá bid/ask, OHLC, v.v.)",
-                 foreground='blue').pack(anchor=tk.W, pady=5)
-
-        ttk.Button(raw_data_section, text="📊 Mở xem dữ liệu thô",
-                  command=self.main_app.open_raw_data_viewer,
-                  width=30).pack(anchor=tk.W, pady=5)
-        
         # Auto reset Python section
         python_reset_section = ttk.LabelFrame(tools_frame, text="🔁 Tự động khởi động lại Python", padding="20")
         python_reset_section.pack(fill=tk.X, pady=10)
@@ -8797,6 +8786,30 @@ Cách sử dụng:
 
         ttk.Button(connection_section, text="🔗 Mở kết nối",
                   command=self.main_app.open_connected_brokers,
+                  width=30).pack(anchor=tk.W, pady=5)
+
+        # Trading Hours section
+        trading_hours_section = ttk.LabelFrame(tools_frame, text="📅 Giờ giao dịch", padding="20")
+        trading_hours_section.pack(fill=tk.X, pady=10)
+
+        ttk.Label(trading_hours_section,
+                 text="Xem giờ trade của các symbols từ các sàn",
+                 foreground='blue').pack(anchor=tk.W, pady=5)
+
+        ttk.Button(trading_hours_section, text="📅 Mở giờ giao dịch",
+                  command=self.main_app.open_trading_hours,
+                  width=30).pack(anchor=tk.W, pady=5)
+
+        # Raw Data section
+        raw_data_section = ttk.LabelFrame(tools_frame, text="📊 Xem dữ liệu thô", padding="20")
+        raw_data_section.pack(fill=tk.X, pady=10)
+
+        ttk.Label(raw_data_section,
+                 text="Xem raw data từ MT4/MT5 (giá bid/ask, OHLC, v.v.)",
+                 foreground='blue').pack(anchor=tk.W, pady=5)
+
+        ttk.Button(raw_data_section, text="📊 Mở xem dữ liệu thô",
+                  command=self.main_app.open_raw_data_viewer,
                   width=30).pack(anchor=tk.W, pady=5)
 
     def create_auto_send_tab(self):
@@ -9953,6 +9966,30 @@ Cách sử dụng:
         except Exception as e:
             logger.error(f"Error clearing all hidden delays: {e}")
             messagebox.showerror("Error", f"Lỗi clear all: {str(e)}")
+
+    # ==================== WINDOW CONTROLS ====================
+    def toggle_maximize(self):
+        """✨ Toggle between maximized and normal window state"""
+        try:
+            if self.is_maximized:
+                # Restore to normal size
+                self.window.state('normal')
+                self.is_maximized = False
+                self.maximize_button.config(text="🔲 Phóng to toàn màn hình")
+                logger.info("Settings window restored to normal size")
+            else:
+                # Maximize window
+                self.window.state('zoomed')
+                # For Linux, try both methods
+                try:
+                    self.window.attributes('-zoomed', True)
+                except:
+                    pass
+                self.is_maximized = True
+                self.maximize_button.config(text="🗗 Thu nhỏ")
+                logger.info("Settings window maximized")
+        except Exception as e:
+            logger.error(f"Error toggling maximize: {e}")
 
     # ==================== GLOBAL REFRESH ====================
     def refresh_all_hidden_lists(self):
