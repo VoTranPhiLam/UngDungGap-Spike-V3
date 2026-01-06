@@ -89,8 +89,8 @@ last_data_snapshot = {
 }
 
 delay_settings = {
-    'threshold': 180,  # Default delay threshold in seconds
-    'auto_hide_time': 3600  # Auto hide after 60 minutes
+    'threshold': 300,  # ✨ Default delay threshold in seconds (5 minutes)
+    'auto_hide_time': 3000  # ✨ Auto hide after 50 minutes
 }
 
 # Product-specific delay settings (in minutes)
@@ -462,21 +462,40 @@ def match_first_6_chars_exact(symbol, alias):
     - Lấy 6 chữ cái ĐẦU TIÊN từ cả symbol và alias (sau khi normalize)
     - So sánh CHÍNH XÁC (case-insensitive)
     - Phải khớp LIÊN TIẾP từ ký tự đầu tiên
+    - ✨ Điều kiện độ dài: Symbol có <=4 ký tự CHỈ match alias <=4 ký tự
+    - ✨ Symbol có >4 ký tự KHÔNG match alias <4 ký tự
 
     Ví dụ:
     - EURUSD.s vs EURUSD → EURUSD == EURUSD ✓ (match)
     - EUAUSD.s vs EURUSD → EUAUSD != EURUSD ✗ (không match - ký tự thứ 3 khác)
+    - GCI.cl vs GC → ✗ (không match - GCIcl có 5 ký tự, GC có 2 ký tự)
+    - GCI vs GCIUSD → ✗ (không match - GCI có 3 ký tự, không match với alias 6 ký tự)
 
     Args:
         symbol: Symbol từ sàn (EURUSD.s)
         alias: Alias từ file txt (EURUSD)
 
     Returns:
-        bool: True nếu 6 ký tự đầu khớp chính xác
+        bool: True nếu 6 ký tự đầu khớp chính xác VÀ độ dài hợp lệ
     """
     # Normalize cả 2
     norm_symbol = normalize_symbol(symbol).lower()
     norm_alias = normalize_symbol(alias).lower()
+
+    # ✨ ĐIỀU KIỆN ĐỘ DÀI:
+    # - Symbol <= 4 ký tự CHỈ match với alias <= 4 ký tự
+    # - Symbol > 4 ký tự KHÔNG match với alias < 4 ký tự
+    len_symbol = len(norm_symbol)
+    len_alias = len(norm_alias)
+
+    if len_symbol <= 4:
+        # Symbol ngắn (<=4) chỉ match với alias ngắn (<=4)
+        if len_alias > 4:
+            return False
+    else:
+        # Symbol dài (>4) không match với alias ngắn (<4)
+        if len_alias < 4:
+            return False
 
     # Lấy 6 ký tự đầu
     first_6_symbol = norm_symbol[:6]
@@ -492,21 +511,40 @@ def match_exact_all_letters(symbol, alias):
     Quy tắc:
     - Sau khi normalize, tất cả các chữ cái phải khớp CHÍNH XÁC
     - Case-insensitive
+    - ✨ Điều kiện độ dài: Symbol có <=4 ký tự CHỈ match alias <=4 ký tự
+    - ✨ Symbol có >4 ký tự KHÔNG match alias <4 ký tự
 
     Ví dụ:
     - BTCUSD.m vs BTCUSD → BTCUSD == BTCUSD ✓ (match)
     - BTCUSDT vs BTCUSD → BTCUSDT != BTCUSD ✗ (không match - có thêm chữ T)
+    - GCI.cl vs GC → ✗ (không match - GCIcl có 5 ký tự, GC có 2 ký tự)
+    - GCI vs GCIUSD → ✗ (không match - GCI có 3 ký tự, không match với alias 6 ký tự)
 
     Args:
         symbol: Symbol từ sàn
         alias: Alias từ file txt
 
     Returns:
-        bool: True nếu tất cả chữ cái khớp chính xác
+        bool: True nếu tất cả chữ cái khớp chính xác VÀ độ dài hợp lệ
     """
     # Normalize cả 2 (loại bỏ ký tự đặc biệt, chỉ giữ chữ và số)
     norm_symbol = normalize_symbol(symbol).lower()
     norm_alias = normalize_symbol(alias).lower()
+
+    # ✨ ĐIỀU KIỆN ĐỘ DÀI:
+    # - Symbol <= 4 ký tự CHỈ match với alias <= 4 ký tự
+    # - Symbol > 4 ký tự KHÔNG match với alias < 4 ký tự
+    len_symbol = len(norm_symbol)
+    len_alias = len(norm_alias)
+
+    if len_symbol <= 4:
+        # Symbol ngắn (<=4) chỉ match với alias ngắn (<=4)
+        if len_alias > 4:
+            return False
+    else:
+        # Symbol dài (>4) không match với alias ngắn (<4)
+        if len_alias < 4:
+            return False
 
     # So sánh chính xác
     return norm_symbol == norm_alias
@@ -3387,7 +3425,35 @@ class GapSpikeDetectorGUI:
         # Delay Board Frame (replaces Connected Brokers)
         delay_frame = ttk.LabelFrame(self.root, text="⏱️ Delay Alert (Bid không đổi)", padding="10")
         delay_frame.pack(fill=tk.X, padx=10, pady=5)
-        
+
+        # ✨ Control frame for sort filter
+        delay_control_frame = ttk.Frame(delay_frame)
+        delay_control_frame.pack(fill=tk.X, pady=(0, 5))
+
+        # ✨ Sort filter dropdown
+        ttk.Label(delay_control_frame, text="Sắp xếp:").pack(side=tk.LEFT, padx=(0, 5))
+        self.delay_sort_mode = tk.StringVar(value="newest_first")  # Default: newest first
+        delay_sort_combo = ttk.Combobox(delay_control_frame, textvariable=self.delay_sort_mode,
+                                       values=["newest_first", "longest_first"],
+                                       state="readonly", width=25)
+        delay_sort_combo.pack(side=tk.LEFT, padx=5)
+        delay_sort_combo.bind('<<ComboboxSelected>>', lambda e: self.update_board())
+
+        # ✨ Sort mode descriptions
+        sort_descriptions = {
+            "newest_first": "Delay mới nhất lên trên",
+            "longest_first": "Delay lâu nhất lên trên"
+        }
+
+        # Display current selection description
+        def update_sort_label(event=None):
+            current = self.delay_sort_mode.get()
+            sort_label.config(text=f"({sort_descriptions.get(current, '')})")
+
+        sort_label = ttk.Label(delay_control_frame, text=f"({sort_descriptions['newest_first']})")
+        sort_label.pack(side=tk.LEFT, padx=5)
+        delay_sort_combo.bind('<<ComboboxSelected>>', lambda e: [update_sort_label(), self.update_board()])
+
         # Create Treeview for delays
         delay_columns = ('Broker', 'Symbol', 'Bid', 'Last Change', 'Delay Time', 'Status')
         self.delay_tree = ttk.Treeview(delay_frame, columns=delay_columns, show='headings', height=4)
@@ -4080,8 +4146,14 @@ class GapSpikeDetectorGUI:
                         'custom_delay_minutes': product_custom_delay_minutes  # Track custom delay for display
                     })
         
-        # Sort by delay duration (longest first)
-        delayed_symbols.sort(key=lambda x: x['delay_duration'], reverse=True)
+        # ✨ Sort theo mode được chọn
+        sort_mode = self.delay_sort_mode.get()
+        if sort_mode == "newest_first":
+            # Delay mới nhất lên trên = last_change_time lớn nhất lên trên
+            delayed_symbols.sort(key=lambda x: x['last_change_time'], reverse=True)
+        else:  # longest_first
+            # Delay lâu nhất lên trên = delay_duration lớn nhất lên trên
+            delayed_symbols.sort(key=lambda x: x['delay_duration'], reverse=True)
         
         # Add to tree
         for item in delayed_symbols:
