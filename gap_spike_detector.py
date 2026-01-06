@@ -6803,66 +6803,76 @@ class RealTimeChartWindow:
         self.broker = broker
         self.symbol = symbol
         self.key = f"{broker}_{symbol}"
-        
+
+        # 🔧 Track last candle data to avoid unnecessary redraws
+        self.last_candle_count = 0
+        self.last_candle_hash = None
+        self.last_bid = None
+        self.last_ask = None
+
         self.window = tk.Toplevel(parent)
         self.window.title(f"📈 {symbol} - {broker} (M1)")
         self.window.geometry("1200x700")
-        
+
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
         self.window.grab_set()  # Chặn input đến parent window
-        
+
         self.window.lift()  # Đưa cửa sổ lên trên
         self.window.focus_force()  # Focus vào cửa sổ
-        
+
         # Top Frame - Info
         info_frame = ttk.Frame(self.window, padding="10")
         info_frame.pack(fill=tk.X)
-        
+
         ttk.Label(info_frame, text=f"📊 {symbol}", font=('Arial', 16, 'bold')).pack(side=tk.LEFT, padx=10)
         ttk.Label(info_frame, text=f"Broker: {broker}", font=('Arial', 10)).pack(side=tk.LEFT, padx=10)
-        
+
         self.price_label = ttk.Label(info_frame, text="Bid: --- | Ask: ---", font=('Arial', 12, 'bold'))
         self.price_label.pack(side=tk.LEFT, padx=20)
-        
+
+        # 🔧 Add delay status label
+        self.delay_label = ttk.Label(info_frame, text="", font=('Arial', 10, 'bold'), foreground='orange')
+        self.delay_label.pack(side=tk.LEFT, padx=10)
+
         self.candle_count_label = ttk.Label(info_frame, text="Candles: 0/60", font=('Arial', 10))
         self.candle_count_label.pack(side=tk.LEFT, padx=10)
-        
+
         self.time_label = ttk.Label(info_frame, text="", font=('Arial', 10))
         self.time_label.pack(side=tk.RIGHT, padx=10)
-        
+
         # Chart Frame
         chart_frame = ttk.Frame(self.window)
         chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         # Create matplotlib figure
         self.fig = Figure(figsize=(12, 6), dpi=100, facecolor='#1e1e1e')
         self.ax = self.fig.add_subplot(111, facecolor='#2d2d30')
-        
+
         # Canvas
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
+
         # Configure plot style
         self.ax.tick_params(colors='white', labelsize=9)
         self.ax.spines['bottom'].set_color('#404040')
-        self.ax.spines['top'].set_color('#404040') 
+        self.ax.spines['top'].set_color('#404040')
         self.ax.spines['right'].set_color('#404040')
         self.ax.spines['left'].set_color('#404040')
         self.ax.grid(True, alpha=0.2, color='#404040', linestyle='--')
-        
+
         # Current bid/ask for horizontal lines
         self.bid_line = None
         self.ask_line = None
-        
+
         # Initial draw
         self.update_chart()
-        
+
         # Auto-refresh every 1 second
         self.is_running = True
         self.auto_refresh()
-        
+
         # Cleanup on close
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
     
@@ -6942,51 +6952,121 @@ class RealTimeChartWindow:
         """Update chart với data mới"""
         try:
             with data_lock:
+                # 🔧 Check if product is delayed
+                current_time = time.time()
+                is_delayed = False
+                delay_duration = 0
+
+                if self.key in bid_tracking:
+                    last_change_time = bid_tracking[self.key]['last_change_time']
+                    delay_duration = current_time - last_change_time
+
+                    # Get custom delay threshold for this product (in minutes)
+                    product_custom_delay_minutes = product_delay_settings.get(self.key, None)
+                    if product_custom_delay_minutes is not None:
+                        delay_threshold = product_custom_delay_minutes * 60  # Convert to seconds
+                    else:
+                        delay_threshold = delay_settings.get('threshold', 300)
+
+                    is_delayed = delay_duration >= delay_threshold
+
                 # Get candle data
                 candles = candle_data.get(self.key, [])
-                
+
+                # 🔧 Create hash of candle data to detect changes
+                if candles:
+                    # Use last 3 candles for hash (timestamp + close price)
+                    last_candles = candles[-3:] if len(candles) >= 3 else candles
+                    candle_hash = hash(tuple((ts, c) for ts, _, _, _, c in last_candles))
+                else:
+                    candle_hash = None
+
+                # 🔧 Only redraw chart if candle data changed OR first time
+                should_redraw_chart = (
+                    candle_hash != self.last_candle_hash or
+                    len(candles) != self.last_candle_count or
+                    self.last_candle_hash is None
+                )
+
                 # Update candle count label
                 candle_count = len(candles)
                 max_candles = 60
                 self.candle_count_label.config(text=f"Candles: {candle_count}/{max_candles}")
-                
-                # Draw candlesticks
-                self.draw_candlesticks(candles)
-                
-                # Get current bid/ask
+
+                # 🔧 Update delay status label
+                if is_delayed:
+                    delay_minutes = int(delay_duration / 60)
+                    delay_seconds = int(delay_duration % 60)
+                    self.delay_label.config(text=f"⚠️ DELAY: {delay_minutes}m {delay_seconds}s")
+                else:
+                    self.delay_label.config(text="")
+
+                # 🔧 Track if we need to redraw canvas
+                needs_canvas_redraw = False
+
+                # 🔧 Draw candlesticks ONLY if data changed
+                if should_redraw_chart:
+                    self.draw_candlesticks(candles)
+                    self.last_candle_hash = candle_hash
+                    self.last_candle_count = len(candles)
+                    needs_canvas_redraw = True
+
+                # 🔧 Update bid/ask lines ONLY if bid/ask changed
+                # This prevents unnecessary redraws when prices don't change
                 if self.broker in market_data and self.symbol in market_data[self.broker]:
                     symbol_data = market_data[self.broker][self.symbol]
                     bid = symbol_data.get('bid', 0)
                     ask = symbol_data.get('ask', 0)
                     digits = symbol_data.get('digits', 5)
-                    
-                    # Draw bid/ask lines
-                    if bid > 0 and ask > 0:
-                        # Bid line (red)
+
+                    # Check if bid/ask changed
+                    bid_ask_changed = (bid != self.last_bid or ask != self.last_ask)
+
+                    # Draw bid/ask lines ONLY if they changed OR chart was redrawn
+                    if bid > 0 and ask > 0 and (bid_ask_changed or should_redraw_chart):
+                        # Remove old lines
                         if self.bid_line:
-                            self.bid_line.remove()
-                        self.bid_line = self.ax.axhline(y=bid, color='#ef5350', linestyle='--', 
-                                                        linewidth=1.5, alpha=0.8, label=f'Bid: {bid:.{digits}f}')
-                        
-                        # Ask line (green)
+                            try:
+                                self.bid_line.remove()
+                            except:
+                                pass
                         if self.ask_line:
-                            self.ask_line.remove()
-                        self.ask_line = self.ax.axhline(y=ask, color='#26a69a', linestyle='--', 
+                            try:
+                                self.ask_line.remove()
+                            except:
+                                pass
+
+                        # Bid line (red)
+                        self.bid_line = self.ax.axhline(y=bid, color='#ef5350', linestyle='--',
+                                                        linewidth=1.5, alpha=0.8, label=f'Bid: {bid:.{digits}f}')
+
+                        # Ask line (green)
+                        self.ask_line = self.ax.axhline(y=ask, color='#26a69a', linestyle='--',
                                                         linewidth=1.5, alpha=0.8, label=f'Ask: {ask:.{digits}f}')
-                        
+
                         # Legend
-                        self.ax.legend(loc='upper left', fontsize=9, facecolor='#2d2d30', 
+                        self.ax.legend(loc='upper left', fontsize=9, facecolor='#2d2d30',
                                      edgecolor='#404040', labelcolor='white')
-                        
-                        # Update price label
+
+                        # Update last bid/ask
+                        self.last_bid = bid
+                        self.last_ask = ask
+                        needs_canvas_redraw = True
+
+                    # Update price label (always update, even if not redrawn)
+                    if bid > 0 and ask > 0:
                         self.price_label.config(text=f"Bid: {bid:.{digits}f} | Ask: {ask:.{digits}f}")
-                
+                else:
+                    # No market data available
+                    self.price_label.config(text="Bid: --- | Ask: ---")
+
                 # Update time label
                 self.time_label.config(text=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                
-                # Redraw canvas
-                self.canvas.draw()
-                
+
+                # 🔧 Redraw canvas ONLY if something changed
+                if needs_canvas_redraw:
+                    self.canvas.draw()
+
         except Exception as e:
             logger.error(f"Error updating chart: {e}")
     
