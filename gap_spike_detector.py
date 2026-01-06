@@ -10821,18 +10821,21 @@ class PictureGalleryWindow:
         y = (screen_height - window_height) // 2
 
         self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
+
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
         self.window.grab_set()  # Chặn input đến parent window
-        
+
         self.window.lift()  # Đưa cửa sổ lên trên
         self.window.focus_force()  # Focus vào cửa sổ
-        
+
         # Current selected image
         self.current_image = None
         self.current_image_path = None
-        
+
+        # ✨ FIX: Store filtered files to avoid rebuilding with different sort order
+        self.filtered_files = []
+
         # Accepted screenshots for Google Sheets
         self.accepted_screenshots = []
         
@@ -11034,25 +11037,26 @@ class PictureGalleryWindow:
             # Filter images
             filter_type = self.filter_type_var.get()
             filter_broker = self.filter_broker_var.get()
-            
-            filtered_files = []
+
+            # ✨ FIX: Store in instance variable to maintain sort order consistency
+            self.filtered_files = []
             for filepath in image_files:
                 filename = os.path.basename(filepath)
-                
+
                 # Filter by type
                 if filter_type != "All":
                     if f"_{filter_type}_" not in filename:
                         continue
-                
+
                 # Filter by broker
                 if filter_broker != "All":
                     if not filename.startswith(filter_broker + "_"):
                         continue
-                
-                filtered_files.append(filepath)
-            
+
+                self.filtered_files.append(filepath)
+
             # Add to listbox
-            for filepath in filtered_files:
+            for filepath in self.filtered_files:
                 filename = os.path.basename(filepath)
                 # Parse filename: broker_symbol_type_timestamp.png
                 parts = filename.replace('.png', '').split('_')
@@ -11079,7 +11083,7 @@ class PictureGalleryWindow:
             
             # Update info
             total = len(image_files)
-            shown = len(filtered_files)
+            shown = len(self.filtered_files)
             self.info_label.config(text=f"Total: {total} screenshots | Shown: {shown}")
             
         except Exception as e:
@@ -11092,37 +11096,15 @@ class PictureGalleryWindow:
             selection = self.image_listbox.curselection()
             if not selection:
                 return
-            
+
             index = selection[0]
-            
-            # Get all files again (same filtering)
-            folder = screenshot_settings['folder']
-            pattern = os.path.join(folder, "*.png")
-            image_files = glob.glob(pattern)
-            image_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-            
-            # Filter images (same logic as load_pictures)
-            filter_type = self.filter_type_var.get()
-            filter_broker = self.filter_broker_var.get()
-            
-            filtered_files = []
-            for filepath in image_files:
-                filename = os.path.basename(filepath)
-                
-                if filter_type != "All":
-                    if f"_{filter_type}_" not in filename:
-                        continue
-                
-                if filter_broker != "All":
-                    if not filename.startswith(filter_broker + "_"):
-                        continue
-                
-                filtered_files.append(filepath)
-            
-            if index < len(filtered_files):
-                filepath = filtered_files[index]
+
+            # ✨ FIX: Use stored filtered_files instead of rebuilding with different sort order
+            # This ensures the index matches the displayed list order
+            if index < len(self.filtered_files):
+                filepath = self.filtered_files[index]
                 self.display_image(filepath)
-        
+
         except Exception as e:
             logger.error(f"Error selecting image: {e}")
     
@@ -11183,32 +11165,12 @@ class PictureGalleryWindow:
             if not selected_indices:
                 return  # No selection
 
-            # Get all files to delete
-            folder = screenshot_settings['folder']
-            pattern = os.path.join(folder, "*.png")
-            image_files = glob.glob(pattern)
-            image_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-
-            # Apply same filters as load_pictures
-            filter_type = self.filter_type_var.get()
-            filter_broker = self.filter_broker_var.get()
-
-            filtered_files = []
-            for filepath in image_files:
-                filename = os.path.basename(filepath)
-                if filter_type != "All":
-                    if f"_{filter_type}_" not in filename:
-                        continue
-                if filter_broker != "All":
-                    if not filename.startswith(filter_broker + "_"):
-                        continue
-                filtered_files.append(filepath)
-
+            # ✨ FIX: Use stored filtered_files to ensure correct file deletion
             # Get files to delete
             files_to_delete = []
             for index in selected_indices:
-                if index < len(filtered_files):
-                    files_to_delete.append(filtered_files[index])
+                if index < len(self.filtered_files):
+                    files_to_delete.append(self.filtered_files[index])
 
             if not files_to_delete:
                 return
@@ -11518,7 +11480,8 @@ class PictureGalleryWindow:
             filter_type = self.filter_type_var.get()
             filter_broker = self.filter_broker_var.get()
 
-            filtered_files = []
+            # ✨ FIX: Store in instance variable to maintain sort order
+            self.filtered_files = []
             for filepath in image_files:
                 filename = os.path.basename(filepath)
 
@@ -11532,7 +11495,7 @@ class PictureGalleryWindow:
                     if not filename.startswith(filter_broker + "_"):
                         continue
 
-                filtered_files.append(filepath)
+                self.filtered_files.append(filepath)
 
             # Sort by broker + symbol
             def get_broker_symbol(filepath):
@@ -11544,12 +11507,12 @@ class PictureGalleryWindow:
                     return (broker, symbol)
                 return ('', '')
 
-            filtered_files.sort(key=get_broker_symbol)
+            self.filtered_files.sort(key=get_broker_symbol)
 
             # Rebuild listbox with sorted order
             self.image_listbox.delete(0, tk.END)
 
-            for filepath in filtered_files:
+            for filepath in self.filtered_files:
                 filename = os.path.basename(filepath)
                 parts = filename.replace('.png', '').split('_')
 
@@ -11574,8 +11537,8 @@ class PictureGalleryWindow:
                     self.image_listbox.insert(tk.END, filename)
 
             # Update info
-            self.info_label.config(text=f"Sorted by product: {len(filtered_files)} screenshots")
-            logger.info(f"Sorted {len(filtered_files)} screenshots by broker + symbol")
+            self.info_label.config(text=f"Sorted by product: {len(self.filtered_files)} screenshots")
+            logger.info(f"Sorted {len(self.filtered_files)} screenshots by broker + symbol")
 
         except Exception as e:
             logger.error(f"Error sorting by product: {e}")
