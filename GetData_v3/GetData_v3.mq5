@@ -24,6 +24,7 @@ Section_Trade_Ngay_Trong_Tuan glb_Section_Trade_Array[10];//CO 7 ngay tu : 0-6
 input int SendInterval = 1;                  // Send interval (seconds)
 input string glbStringFilePath = "web_url";  // File .txt chứa URL
 input bool SendOnlyOpenMarkets = false;      // Chỉ gửi sản phẩm đang mở (false = gửi tất cả)
+input bool SendOnlyCurrentSymbol = false;    // ✨ Chỉ gửi symbol của chart hiện tại (fix lỗi không hide được)
 string WebServerURL = "";                    // URL sẽ được đọc từ file
 datetime lastSendTime = 0;
 
@@ -140,15 +141,36 @@ string GetMarketWatchData()
    if (!ReadWebServerURL()) return "";
 
    string jsonData = "{";
-   int totalSymbols = SymbolsTotal(true);
-   bool first = true;
 
+   // ✨ Nếu chỉ gửi symbol hiện tại, tạo array có 1 phần tử
+   int totalSymbols;
+   string symbolsToProcess[];
+
+   if(SendOnlyCurrentSymbol)
+   {
+      // Chỉ gửi symbol của chart hiện tại
+      totalSymbols = 1;
+      ArrayResize(symbolsToProcess, 1);
+      symbolsToProcess[0] = Symbol();
+   }
+   else
+   {
+      // Gửi tất cả symbols trong Market Watch
+      totalSymbols = SymbolsTotal(true);
+      ArrayResize(symbolsToProcess, totalSymbols);
+      for(int j = 0; j < totalSymbols; j++)
+      {
+         symbolsToProcess[j] = SymbolName(j, true);
+      }
+   }
+
+   bool first = true;
    string symbolsData = "[";
    string brokerServer = AccountInfoString(ACCOUNT_SERVER);
 
    for (int i = 0; i < totalSymbols; i++)
    {
-      string symbol = SymbolName(i, true);
+      string symbol = symbolsToProcess[i];
       double bid, ask;
       int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
 
