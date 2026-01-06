@@ -430,6 +430,87 @@ def normalize_symbol(symbol):
     """
     return re.sub(r'[^a-zA-Z0-9]', '', symbol)
 
+def is_forex_or_precious_metal(symbol):
+    """
+    ✨ Kiểm tra xem symbol có phải là FX/ngoại hối/vàng bạc không
+
+    Quy tắc nhận dạng:
+    - Symbol có 6+ ký tự
+    - Toàn bộ là chữ cái (không có số)
+    - Ví dụ: EURUSD, GBPUSD, USDJPY, XAUUSD, XAGUSD
+
+    Args:
+        symbol: Symbol đã được normalize
+
+    Returns:
+        bool: True nếu là FX/precious metal, False nếu không
+    """
+    # Normalize symbol (loại bỏ ký tự đặc biệt)
+    normalized = normalize_symbol(symbol)
+
+    # Kiểm tra: 6+ ký tự và toàn bộ là chữ cái
+    if len(normalized) >= 6 and normalized.isalpha():
+        return True
+
+    return False
+
+def match_first_6_chars_exact(symbol, alias):
+    """
+    ✨ Match CHÍNH XÁC 6 chữ cái đầu tiên (cho FX/precious metals)
+
+    Quy tắc:
+    - Lấy 6 chữ cái ĐẦU TIÊN từ cả symbol và alias (sau khi normalize)
+    - So sánh CHÍNH XÁC (case-insensitive)
+    - Phải khớp LIÊN TIẾP từ ký tự đầu tiên
+
+    Ví dụ:
+    - EURUSD.s vs EURUSD → EURUSD == EURUSD ✓ (match)
+    - EUAUSD.s vs EURUSD → EUAUSD != EURUSD ✗ (không match - ký tự thứ 3 khác)
+
+    Args:
+        symbol: Symbol từ sàn (EURUSD.s)
+        alias: Alias từ file txt (EURUSD)
+
+    Returns:
+        bool: True nếu 6 ký tự đầu khớp chính xác
+    """
+    # Normalize cả 2
+    norm_symbol = normalize_symbol(symbol).lower()
+    norm_alias = normalize_symbol(alias).lower()
+
+    # Lấy 6 ký tự đầu
+    first_6_symbol = norm_symbol[:6]
+    first_6_alias = norm_alias[:6]
+
+    # So sánh chính xác
+    return first_6_symbol == first_6_alias and len(first_6_symbol) == 6
+
+def match_exact_all_letters(symbol, alias):
+    """
+    ✨ Match CHÍNH XÁC TẤT CẢ các chữ cái (cho các sản phẩm không phải FX)
+
+    Quy tắc:
+    - Sau khi normalize, tất cả các chữ cái phải khớp CHÍNH XÁC
+    - Case-insensitive
+
+    Ví dụ:
+    - BTCUSD.m vs BTCUSD → BTCUSD == BTCUSD ✓ (match)
+    - BTCUSDT vs BTCUSD → BTCUSDT != BTCUSD ✗ (không match - có thêm chữ T)
+
+    Args:
+        symbol: Symbol từ sàn
+        alias: Alias từ file txt
+
+    Returns:
+        bool: True nếu tất cả chữ cái khớp chính xác
+    """
+    # Normalize cả 2 (loại bỏ ký tự đặc biệt, chỉ giữ chữ và số)
+    norm_symbol = normalize_symbol(symbol).lower()
+    norm_alias = normalize_symbol(alias).lower()
+
+    # So sánh chính xác
+    return norm_symbol == norm_alias
+
 def is_subsequence_match(str1, str2, min_length=5, min_similarity=0.5):
     """
     Logic subsequence matching cải tiến với các điều kiện chặt chẽ hơn:
@@ -576,35 +657,53 @@ def find_symbol_config(symbol):
         symbol_config_cache[symbol] = result
         return result
 
-    # Bước 3: Thử subsequence match (O(n) - fallback cuối cùng)
-    # Tìm alias có ít nhất 5 ký tự khớp theo thứ tự từ trái qua phải
+    # ✨ Bước 3: LOGIC MỚI - Match theo loại sản phẩm
+    # - FX/ngoại hối/vàng bạc: Match CHÍNH XÁC 6 chữ cái đầu
+    # - Các sản phẩm khác: Match CHÍNH XÁC toàn bộ chữ cái
     best_match = None
     best_matched_alias = None
 
-    for alias_lower, symbol_chuan in gap_config_reverse_map.items():
-        if is_subsequence_match(symbol_lower, alias_lower):
-            best_match = symbol_chuan
-            # Tìm alias gốc (không lowercase) từ config
-            config = gap_config[symbol_chuan]
-            for alias in config['aliases']:
-                if alias.lower() == alias_lower:
-                    best_matched_alias = alias
-                    break
-            if not best_matched_alias:
-                best_matched_alias = symbol_chuan
-            # Tìm được match đầu tiên thì dừng ngay (không cần tìm best match)
+    # ✨ Kiểm tra xem symbol có phải FX/precious metal không
+    is_fx = is_forex_or_precious_metal(symbol)
+
+    # ✨ Duyệt qua tất cả aliases trong file txt để tìm match
+    for symbol_chuan, config in gap_config.items():
+        # Kiểm tra với symbol chính
+        all_aliases_to_check = [symbol_chuan] + config['aliases']
+
+        for alias in all_aliases_to_check:
+            matched = False
+
+            if is_fx:
+                # ✨ FX/precious metals: Match CHÍNH XÁC 6 chữ cái đầu
+                # Ví dụ: EURUSD.s → EURUSD (OK), EUAUSD.s → EURUSD (KHÔNG OK)
+                if match_first_6_chars_exact(symbol, alias):
+                    matched = True
+                    logger.info(f"✅ FX Match (6 chars): '{symbol}' → '{alias}' (từ file txt)")
+            else:
+                # ✨ Các sản phẩm khác: Match CHÍNH XÁC toàn bộ chữ cái
+                # Ví dụ: BTCUSD.m → BTCUSD (OK), BTCUSDT → BTCUSD (KHÔNG OK)
+                if match_exact_all_letters(symbol, alias):
+                    matched = True
+                    logger.info(f"✅ Exact Match (all letters): '{symbol}' → '{alias}' (từ file txt)")
+
+            if matched:
+                best_match = symbol_chuan
+                best_matched_alias = alias
+                break
+
+        if best_match:
             break
 
     if best_match:
         config = gap_config[best_match]
-        # ✅ Tắt log subsequence match để tránh spam log (chỉ dò 1 lần khi khởi động)
-        # logger.info(f"✅ Subsequence match: '{symbol}' → '{best_matched_alias}'")
         # ✅ Lưu vào cache trước khi return
         result = (best_match, config, best_matched_alias)
         symbol_config_cache[symbol] = result
         return result
 
     # ✅ Cache cả trường hợp không tìm thấy để tránh tìm lại
+    logger.warning(f"❌ Không tìm thấy config cho symbol: '{symbol}' (FX={is_fx})")
     result = (None, None, None)
     symbol_config_cache[symbol] = result
     return result
