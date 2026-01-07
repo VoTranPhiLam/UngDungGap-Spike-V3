@@ -3174,21 +3174,24 @@ def receive_data():
                         candle_data[key] = []
                 
                 # Then accumulate current candle data (as before)
-                if current_ohlc.get('open') and current_ohlc.get('close'):
+                # 🔒 IMPORTANT: Only add candle data if market is OPEN
+                is_market_open = symbol_data.get('isOpen', True)
+
+                if current_ohlc.get('open') and current_ohlc.get('close') and is_market_open:
                     # Round timestamp về đầu phút (M1 = 60s)
                     # VD: 14:30:45 → 14:30:00
                     candle_time = (timestamp // 60) * 60
-                    
+
                     o = float(current_ohlc.get('open', 0))
                     h = float(current_ohlc.get('high', 0))
                     l = float(current_ohlc.get('low', 0))
                     c = float(current_ohlc.get('close', 0))
-                    
+
                     # ✅ FIX: LUÔN đảm bảo list được khởi tạo (không chỉ lần đầu)
                     # Nếu key chưa tồn tại HOẶC list bị xóa, khởi tạo lại
                     if key not in candle_data or not isinstance(candle_data[key], list):
                         candle_data[key] = []
-                    
+
                     # Kiểm tra nến cuối cùng
                     if candle_data[key]:
                         last_candle = candle_data[key][-1]
@@ -3222,10 +3225,14 @@ def receive_data():
                     else:
                         # Nến đầu tiên (list trống)
                         candle_data[key].append((candle_time, o, h, l, c))
-                    
+
                     # Giữ tối đa 200 nến (để chart load nhanh)
                     if len(candle_data[key]) > 200:
                         candle_data[key] = candle_data[key][-200:]
+                elif not is_market_open:
+                    # 🔒 Market đóng cửa - Không thêm nến mới, chỉ đảm bảo list tồn tại
+                    if key not in candle_data or not isinstance(candle_data[key], list):
+                        candle_data[key] = []
 
                 # Tính toán Gap và Spike
                 # Kiểm tra nếu setting "only_check_open_market" được bật
@@ -6809,6 +6816,7 @@ class RealTimeChartWindow:
         self.last_candle_hash = None
         self.last_bid = None
         self.last_ask = None
+        self.last_market_open = True
 
         self.window = tk.Toplevel(parent)
         self.window.title(f"📈 {symbol} - {broker} (M1)")
@@ -6881,47 +6889,57 @@ class RealTimeChartWindow:
         self.is_running = False
         self.window.destroy()
     
-    def draw_candlesticks(self, candles):
+    def draw_candlesticks(self, candles, is_market_open=True):
         """Vẽ candlestick chart"""
         # Clear previous plot
         self.ax.clear()
-        
+
+        # 🔒 Check if market is closed
+        if not is_market_open:
+            if not candles:
+                # Market closed AND no candle data - show message
+                self.ax.text(0.5, 0.5, '🔒 ĐANG ĐÓNG CỬA\n\nChưa có dữ liệu nến',
+                            ha='center', va='center', fontsize=14, color='orange',
+                            transform=self.ax.transAxes, weight='bold')
+                return
+            # Else: Market closed but has old candles - continue to draw them
+
         if not candles:
             # No candles yet - show message
             self.ax.text(0.5, 0.5, 'Đang tích lũy nến M1...\nVui lòng đợi ít phút để chart hiển thị',
                         ha='center', va='center', fontsize=12, color='white',
                         transform=self.ax.transAxes)
             return
-        
+
         # Get last 60 candles (or less if not enough yet)
         candles_to_show = candles[-60:] if len(candles) >= 60 else candles
-        
+
         # Draw candlesticks
         for i, (ts, o, h, l, c) in enumerate(candles_to_show):
             # Color: green if close > open, red if close < open
             color = '#26a69a' if c >= o else '#ef5350'
             wick_color = color
-            
+
             # Draw high-low wick (thân nến)
             self.ax.plot([i, i], [l, h], color=wick_color, linewidth=1, solid_capstyle='round')
-            
+
             # Draw open-close body (hình chữ nhật)
             body_height = abs(c - o)
             body_bottom = min(o, c)
-            
-            rect = Rectangle((i - 0.4, body_bottom), 0.8, body_height, 
+
+            rect = Rectangle((i - 0.4, body_bottom), 0.8, body_height,
                            facecolor=color, edgecolor=color, linewidth=1)
             self.ax.add_patch(rect)
-        
+
         # Configure axes
         self.ax.set_xlim(-1, len(candles_to_show))
-        
+
         # Y-axis (price)
         prices = [h for _, _, h, _, _ in candles_to_show] + [l for _, _, _, l, _ in candles_to_show]
         if prices:
             y_margin = (max(prices) - min(prices)) * 0.1
             self.ax.set_ylim(min(prices) - y_margin, max(prices) + y_margin)
-        
+
         # X-axis labels (time)
         x_positions = list(range(0, len(candles_to_show), max(1, len(candles_to_show) // 10)))
         x_labels = []
@@ -6929,24 +6947,32 @@ class RealTimeChartWindow:
             if pos < len(candles_to_show):
                 ts = candles_to_show[pos][0]
                 x_labels.append(server_timestamp_to_datetime(ts).strftime('%H:%M'))
-        
+
         self.ax.set_xticks(x_positions)
         self.ax.set_xticklabels(x_labels, rotation=45, ha='right')
-        
+
         # Labels
         self.ax.set_xlabel('Time (M1)', color='white', fontsize=10)
         self.ax.set_ylabel('Price', color='white', fontsize=10)
         self.ax.set_title(f'{self.symbol} - M1 Chart', color='white', fontsize=12, pad=10)
-        
+
         # Grid
         self.ax.grid(True, alpha=0.2, color='#404040', linestyle='--')
-        
+
         # Style
         self.ax.tick_params(colors='white', labelsize=9)
         self.ax.spines['bottom'].set_color('#404040')
         self.ax.spines['top'].set_color('#404040')
         self.ax.spines['right'].set_color('#404040')
         self.ax.spines['left'].set_color('#404040')
+
+        # 🔒 Add overlay warning if market is closed
+        if not is_market_open:
+            # Add semi-transparent overlay text
+            self.ax.text(0.5, 0.9, '🔒 ĐANG ĐÓNG CỬA',
+                        ha='center', va='center', fontsize=16, color='orange',
+                        transform=self.ax.transAxes, weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='black', alpha=0.7, edgecolor='orange'))
     
     def update_chart(self):
         """Update chart với data mới"""
@@ -6970,6 +6996,12 @@ class RealTimeChartWindow:
 
                     is_delayed = delay_duration >= delay_threshold
 
+                # 🔒 Check if market is open
+                is_market_open = True
+                if self.broker in market_data and self.symbol in market_data[self.broker]:
+                    symbol_data = market_data[self.broker][self.symbol]
+                    is_market_open = symbol_data.get('isOpen', True)
+
                 # Get candle data
                 candles = candle_data.get(self.key, [])
 
@@ -6981,11 +7013,12 @@ class RealTimeChartWindow:
                 else:
                     candle_hash = None
 
-                # 🔧 Only redraw chart if candle data changed OR first time
+                # 🔧 Only redraw chart if candle data changed OR market open status changed OR first time
                 should_redraw_chart = (
                     candle_hash != self.last_candle_hash or
                     len(candles) != self.last_candle_count or
-                    self.last_candle_hash is None
+                    self.last_candle_hash is None or
+                    (hasattr(self, 'last_market_open') and is_market_open != self.last_market_open)
                 )
 
                 # Update candle count label
@@ -7006,9 +7039,10 @@ class RealTimeChartWindow:
 
                 # 🔧 Draw candlesticks ONLY if data changed
                 if should_redraw_chart:
-                    self.draw_candlesticks(candles)
+                    self.draw_candlesticks(candles, is_market_open)
                     self.last_candle_hash = candle_hash
                     self.last_candle_count = len(candles)
+                    self.last_market_open = is_market_open
                     needs_canvas_redraw = True
 
                 # 🔧 Update bid/ask lines ONLY if bid/ask changed
