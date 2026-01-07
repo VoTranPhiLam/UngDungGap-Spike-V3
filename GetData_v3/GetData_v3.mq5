@@ -170,11 +170,19 @@ string GetMarketWatchData()
          default:                              trade_mode_str = "UNKNOWN"; break;
       }
 
-      // Skip symbols that are DISABLED or CLOSEONLY
-      // DISABLED = không còn cho phép trade
-      // CLOSEONLY = chỉ cho phép đóng lệnh, không mở lệnh mới
-      // → Cả 2 mode đều không cần detect Gap/Spike
-      if(trade_mode == SYMBOL_TRADE_MODE_DISABLED || trade_mode == SYMBOL_TRADE_MODE_CLOSEONLY) continue;     
+      // Skip symbols that DON'T allow opening new positions
+      // Only process symbols with FULL, LONGONLY, or SHORTONLY modes
+      // Filter out:
+      // - DISABLED (Trade: No) = hoàn toàn không cho trade
+      // - CLOSEONLY (Trade: Close) = chỉ đóng lệnh, không mở lệnh mới
+      // - UNKNOWN/other modes = các mode không xác định
+      if(trade_mode != SYMBOL_TRADE_MODE_FULL &&
+         trade_mode != SYMBOL_TRADE_MODE_LONGONLY &&
+         trade_mode != SYMBOL_TRADE_MODE_SHORTONLY)
+      {
+         // Skip this symbol - cannot open new positions
+         continue;
+      }     
 
       // Lấy OHLC của nến M1 trước đó và nến hiện tại
       MqlRates rates[];
