@@ -109,11 +109,17 @@ screenshot_settings = {
     'save_spike': True,  # Save screenshot for spike
     'folder': 'pictures',  # Folder to save screenshots
     'assigned_name': '',  # Selected name for Picture Gallery exports
-    'startup_delay_minutes': 5  # Delay in minutes before screenshot starts working after startup
+    'startup_delay_minutes': 5,  # Delay in minutes before screenshot starts working after startup
+    'auto_delete_enabled': False,  # Enable auto-delete old screenshots
+    'auto_delete_hours': 48  # Delete screenshots older than X hours
 }
 
 # Track application startup time for screenshot delay
 app_startup_time = time.time()
+
+# Track last auto-delete time
+last_auto_delete_time = 0
+AUTO_DELETE_INTERVAL = 3600  # Run auto-delete every 1 hour
 
 # ===================== AUDIO ALERT SETTINGS =====================
 audio_settings = {
@@ -2314,6 +2320,52 @@ def ensure_pictures_folder():
         os.makedirs(folder)
         logger.info(f"Created pictures folder: {folder}")
 
+def auto_delete_old_screenshots():
+    """
+    Automatically delete screenshots older than configured hours
+    This runs in background thread periodically
+    """
+    try:
+        if not screenshot_settings.get('auto_delete_enabled', False):
+            return
+
+        folder = screenshot_settings.get('folder', 'pictures')
+        if not os.path.exists(folder):
+            return
+
+        delete_hours = screenshot_settings.get('auto_delete_hours', 48)
+        delete_seconds = delete_hours * 3600
+        current_time = time.time()
+        deleted_count = 0
+
+        # Scan all PNG files in folder
+        for filename in os.listdir(folder):
+            if not filename.endswith('.png'):
+                continue
+
+            filepath = os.path.join(folder, filename)
+
+            try:
+                # Get file creation/modification time
+                file_mtime = os.path.getmtime(filepath)
+                file_age_seconds = current_time - file_mtime
+
+                # Delete if older than threshold
+                if file_age_seconds >= delete_seconds:
+                    # 🔥 Permanent delete (không qua Recycle bin)
+                    os.remove(filepath)
+                    deleted_count += 1
+                    logger.info(f"Auto-deleted old screenshot: {filename} (age: {file_age_seconds/3600:.1f}h)")
+
+            except Exception as e:
+                logger.error(f"Error deleting screenshot {filename}: {e}")
+
+        if deleted_count > 0:
+            logger.info(f"Auto-delete completed: {deleted_count} screenshot(s) deleted (older than {delete_hours}h)")
+
+    except Exception as e:
+        logger.error(f"Error in auto_delete_old_screenshots: {e}")
+
 def capture_chart_screenshot(broker, symbol, detection_type, gap_info=None, spike_info=None, server_timestamp=None):
     """
     Capture screenshot of chart when gap/spike detected
@@ -3450,6 +3502,9 @@ class GapSpikeDetectorGUI:
         self.setup_ui()
         self.update_display()
         self.update_python_reset_schedule(log_message=False)
+
+        # Start periodic auto-delete task
+        self.start_auto_delete_task()
         
     def setup_ui(self):
         """Thiết lập giao diện"""
@@ -5333,6 +5388,25 @@ class GapSpikeDetectorGUI:
             if reschedule_after and reset_executed and python_reset_settings.get('enabled', False):
                 self.update_python_reset_schedule(log_message=False)
     
+    def start_auto_delete_task(self):
+        """Start periodic auto-delete screenshots task"""
+        # Run immediately on startup
+        threading.Thread(target=auto_delete_old_screenshots, daemon=True).start()
+
+        # Schedule next run
+        self.schedule_auto_delete()
+
+    def schedule_auto_delete(self):
+        """Schedule next auto-delete run"""
+        # Run every 1 hour
+        self.root.after(AUTO_DELETE_INTERVAL * 1000, self._run_auto_delete)
+
+    def _run_auto_delete(self):
+        """Callback to run auto-delete in background thread"""
+        threading.Thread(target=auto_delete_old_screenshots, daemon=True).start()
+        # Schedule next run
+        self.schedule_auto_delete()
+
     def update_python_reset_schedule(self, log_message=True):
         """Schedule or cancel automatic Python reset"""
         if self.python_reset_job:
@@ -5341,10 +5415,10 @@ class GapSpikeDetectorGUI:
             except Exception:
                 pass
             self.python_reset_job = None
-        
+
         enabled = python_reset_settings.get('enabled', False)
         interval_minutes = max(1, int(python_reset_settings.get('interval_minutes', 30) or 30))
-        
+
         if enabled:
             interval_ms = interval_minutes * 60 * 1000
             self.python_reset_job = self.root.after(interval_ms, self._auto_reset_python)
@@ -8633,7 +8707,40 @@ Cách sử dụng:
                                    textvariable=self.screenshot_startup_delay_var)
         delay_spinbox.pack(side=tk.LEFT, padx=5)
         ttk.Label(delay_input_frame, text="(0 = không delay, max 60 phút)").pack(side=tk.LEFT, padx=5)
-        
+
+        # Auto-delete settings
+        autodel_frame = ttk.LabelFrame(screenshot_frame, text="🗑️ Tự động xóa hình ảnh cũ", padding="10")
+        autodel_frame.pack(fill=tk.X, pady=5)
+
+        self.auto_delete_enabled_var = tk.BooleanVar(value=screenshot_settings.get('auto_delete_enabled', False))
+        ttk.Checkbutton(autodel_frame, text="✅ Bật tự động xóa hình ảnh cũ",
+                       variable=self.auto_delete_enabled_var).pack(anchor=tk.W, pady=5)
+
+        autodel_info_label = ttk.Label(autodel_frame,
+                                       text="Tự động xóa các ảnh chụp cũ hơn thời gian cấu hình:",
+                                       foreground='blue')
+        autodel_info_label.pack(anchor=tk.W, pady=5)
+
+        autodel_input_frame = ttk.Frame(autodel_frame)
+        autodel_input_frame.pack(anchor=tk.W, pady=5)
+
+        ttk.Label(autodel_input_frame, text="Xóa sau (giờ):").pack(side=tk.LEFT, padx=5)
+        self.auto_delete_hours_var = tk.IntVar(value=screenshot_settings.get('auto_delete_hours', 48))
+        autodel_spinbox = ttk.Spinbox(autodel_input_frame, from_=1, to=168, width=10,
+                                      textvariable=self.auto_delete_hours_var)
+        autodel_spinbox.pack(side=tk.LEFT, padx=5)
+        ttk.Label(autodel_input_frame, text="(1-168 giờ / 1-7 ngày)").pack(side=tk.LEFT, padx=5)
+
+        autodel_warning_label = ttk.Label(autodel_frame,
+                                         text="⚠️ Hình ảnh sẽ bị XÓA VĨNH VIỄN (không qua Recycle bin)",
+                                         foreground='red', font=('Arial', 9, 'bold'))
+        autodel_warning_label.pack(anchor=tk.W, pady=5)
+
+        autodel_note_label = ttk.Label(autodel_frame,
+                                       text="📌 Kiểm tra định kỳ mỗi 1 giờ. Mặc định: 48 giờ (2 ngày)",
+                                       foreground='gray', font=('Arial', 8))
+        autodel_note_label.pack(anchor=tk.W, pady=2)
+
         # Info
         info_frame = ttk.Frame(screenshot_frame)
         info_frame.pack(fill=tk.X, pady=10)
@@ -8665,6 +8772,8 @@ Cách sử dụng:
             screenshot_settings['save_spike'] = self.screenshot_spike_var.get()
             screenshot_settings['folder'] = self.screenshot_folder_var.get()
             screenshot_settings['startup_delay_minutes'] = self.screenshot_startup_delay_var.get()
+            screenshot_settings['auto_delete_enabled'] = self.auto_delete_enabled_var.get()
+            screenshot_settings['auto_delete_hours'] = self.auto_delete_hours_var.get()
 
             schedule_save('screenshot_settings')
             ensure_pictures_folder()
@@ -8675,7 +8784,9 @@ Cách sử dụng:
                               f"- Save Gap: {screenshot_settings['save_gap']}\n"
                               f"- Save Spike: {screenshot_settings['save_spike']}\n"
                               f"- Folder: {screenshot_settings['folder']}\n"
-                              f"- Startup delay: {screenshot_settings['startup_delay_minutes']} phút")
+                              f"- Startup delay: {screenshot_settings['startup_delay_minutes']} phút\n"
+                              f"- Auto-delete: {screenshot_settings['auto_delete_enabled']}\n"
+                              f"- Auto-delete after: {screenshot_settings['auto_delete_hours']} giờ")
         except Exception as e:
             logger.error(f"Error saving screenshot settings: {e}")
             messagebox.showerror("Error", f"Failed to save: {str(e)}")

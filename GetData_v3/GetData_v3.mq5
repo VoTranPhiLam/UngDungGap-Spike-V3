@@ -153,8 +153,26 @@ string GetMarketWatchData()
 
       if(!SymbolInfoDouble(symbol, SYMBOL_BID, bid)) continue;
       if(!SymbolInfoDouble(symbol, SYMBOL_ASK, ask)) continue;
-      double point_value = SymbolInfoDouble(symbol, SYMBOL_POINT);    
-      bool isOpen = FunCheckMartKetOpenMotCapTien(symbol);     
+      double point_value = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      bool isOpen = FunCheckMartKetOpenMotCapTien(symbol);
+
+      // Get SYMBOL_TRADE_MODE to filter disabled symbols
+      ENUM_SYMBOL_TRADE_MODE trade_mode = (ENUM_SYMBOL_TRADE_MODE)SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE);
+      string trade_mode_str = "";
+
+      switch(trade_mode)
+      {
+         case SYMBOL_TRADE_MODE_DISABLED:     trade_mode_str = "DISABLED"; break;
+         case SYMBOL_TRADE_MODE_LONGONLY:     trade_mode_str = "LONGONLY"; break;
+         case SYMBOL_TRADE_MODE_SHORTONLY:    trade_mode_str = "SHORTONLY"; break;
+         case SYMBOL_TRADE_MODE_CLOSEONLY:    trade_mode_str = "CLOSEONLY"; break;
+         case SYMBOL_TRADE_MODE_FULL:         trade_mode_str = "FULL"; break;
+         default:                              trade_mode_str = "UNKNOWN"; break;
+      }
+
+      // Skip symbols that are DISABLED for trading
+      // DISABLED = không còn cho phép trade (khác với market đóng cửa)
+      if(trade_mode == SYMBOL_TRADE_MODE_DISABLED) continue;     
 
       // Lấy OHLC của nến M1 trước đó và nến hiện tại
       MqlRates rates[];
