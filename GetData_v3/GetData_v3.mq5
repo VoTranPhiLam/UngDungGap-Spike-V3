@@ -170,9 +170,11 @@ string GetMarketWatchData()
          default:                              trade_mode_str = "UNKNOWN"; break;
       }
 
-      // Skip symbols that are DISABLED for trading
-      // DISABLED = không còn cho phép trade (khác với market đóng cửa)
-      if(trade_mode == SYMBOL_TRADE_MODE_DISABLED) continue;     
+      // Skip symbols that are DISABLED or CLOSEONLY
+      // DISABLED = không còn cho phép trade
+      // CLOSEONLY = chỉ cho phép đóng lệnh, không mở lệnh mới
+      // → Cả 2 mode đều không cần detect Gap/Spike
+      if(trade_mode == SYMBOL_TRADE_MODE_DISABLED || trade_mode == SYMBOL_TRADE_MODE_CLOSEONLY) continue;     
 
       // Lấy OHLC của nến M1 trước đó và nến hiện tại
       MqlRates rates[];
