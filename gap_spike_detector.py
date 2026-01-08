@@ -9189,9 +9189,8 @@ Cách sử dụng:
             return
 
         # ═══════════════════════════════════════════════════════════════════════
-        # Display grouped by TRADE_MODE (sorted order)
+        # Display grouped by TRADE_MODE (2-column layout)
         # ═══════════════════════════════════════════════════════════════════════
-        mode_order = ['DISABLED', 'CLOSEONLY', 'UNKNOWN']
         mode_colors = {
             'DISABLED': '#ffcccc',
             'CLOSEONLY': '#ffffcc',
@@ -9208,85 +9207,150 @@ Cách sử dụng:
             'UNKNOWN': 'Trade: Unknown - Trạng thái không xác định'
         }
 
-        for trade_mode in mode_order:
-            symbols_list = symbols_by_mode[trade_mode]
+        # ═══════════════════════════════════════════════════════════════════════
+        # ROW 1: DISABLED (left) + CLOSEONLY (right) - Side by side
+        # ═══════════════════════════════════════════════════════════════════════
+        disabled_list = symbols_by_mode['DISABLED']
+        closeonly_list = symbols_by_mode['CLOSEONLY']
 
-            if not symbols_list:
-                continue
+        if disabled_list or closeonly_list:
+            # Container cho 2 cột
+            row1_container = ttk.Frame(self.filtered_content_frame)
+            row1_container.pack(fill='both', expand=True, padx=10, pady=8)
 
-            # Sort by broker then symbol
-            symbols_list.sort(key=lambda x: (x[0], x[1]))
+            # ═══ LEFT COLUMN: DISABLED ═══
+            if disabled_list:
+                disabled_list.sort(key=lambda x: (x[0], x[1]))
+                self._create_trade_mode_panel(
+                    row1_container,
+                    'DISABLED',
+                    disabled_list,
+                    mode_icons['DISABLED'],
+                    mode_desc['DISABLED'],
+                    mode_colors['DISABLED'],
+                    side='left',
+                    padx=(0, 5)
+                )
 
-            # ═══════════════════════════════════════════════════════════════
-            # Group header
-            # ═══════════════════════════════════════════════════════════════
-            group_frame = ttk.LabelFrame(
+            # ═══ RIGHT COLUMN: CLOSEONLY ═══
+            if closeonly_list:
+                closeonly_list.sort(key=lambda x: (x[0], x[1]))
+                self._create_trade_mode_panel(
+                    row1_container,
+                    'CLOSEONLY',
+                    closeonly_list,
+                    mode_icons['CLOSEONLY'],
+                    mode_desc['CLOSEONLY'],
+                    mode_colors['CLOSEONLY'],
+                    side='left',
+                    padx=(5, 0)
+                )
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # ROW 2: UNKNOWN (full width below)
+        # ═══════════════════════════════════════════════════════════════════════
+        unknown_list = symbols_by_mode['UNKNOWN']
+        if unknown_list:
+            unknown_list.sort(key=lambda x: (x[0], x[1]))
+            self._create_trade_mode_panel(
                 self.filtered_content_frame,
-                text=f"{mode_icons[trade_mode]} {trade_mode} - {len(symbols_list)} symbols",
-                padding=10
-            )
-            group_frame.pack(fill='x', padx=10, pady=8)
-
-            # Description
-            ttk.Label(
-                group_frame,
-                text=mode_desc[trade_mode],
-                font=('Arial', 8),
-                foreground='#666666'
-            ).pack(anchor='w', pady=(0, 8))
-
-            # ═══════════════════════════════════════════════════════════════
-            # Table with data + Scrollbar (fix alignment)
-            # ═══════════════════════════════════════════════════════════════
-
-            # Container frame để tree và scrollbar không bị lệch
-            table_container = ttk.Frame(group_frame)
-            table_container.pack(fill='x', pady=(0, 5))
-
-            # Scrollbar - pack TRƯỚC ở bên phải
-            tree_scroll = ttk.Scrollbar(table_container, orient='vertical')
-            tree_scroll.pack(side='right', fill='y')
-
-            # Tree - pack SAU ở bên trái
-            columns = ('Broker', 'Symbol', 'Last Update')
-            tree = ttk.Treeview(
-                table_container,
-                columns=columns,
-                show='headings',
-                height=min(len(symbols_list), 12),
-                yscrollcommand=tree_scroll.set
+                'UNKNOWN',
+                unknown_list,
+                mode_icons['UNKNOWN'],
+                mode_desc['UNKNOWN'],
+                mode_colors['UNKNOWN'],
+                side='top',
+                padx=(10, 10),
+                full_width=True
             )
 
-            # Configure scrollbar command
-            tree_scroll.config(command=tree.yview)
+    def _create_trade_mode_panel(self, parent, trade_mode, symbols_list, icon, description, color, side='top', padx=(0, 0), full_width=False):
+        """
+        Helper function để tạo panel cho mỗi trade_mode
 
-            tree.heading('Broker', text='Broker')
-            tree.heading('Symbol', text='Symbol')
-            tree.heading('Last Update', text='Last Update')
+        Args:
+            parent: Parent widget
+            trade_mode: DISABLED, CLOSEONLY, UNKNOWN
+            symbols_list: List of (broker, symbol, timestamp) tuples
+            icon: Emoji icon
+            description: Description text
+            color: Background color
+            side: 'top', 'left', 'right' - pack direction
+            padx: Padding tuple (left, right)
+            full_width: True if should use fill='both', False if fill='both' with expand
+        """
+        # Group frame
+        group_frame = ttk.LabelFrame(
+            parent,
+            text=f"{icon} {trade_mode} - {len(symbols_list)} symbols",
+            padding=10
+        )
 
-            tree.column('Broker', width=200, anchor='w')
-            tree.column('Symbol', width=150, anchor='w')
-            tree.column('Last Update', width=180, anchor='center')
+        if full_width:
+            group_frame.pack(fill='x', padx=padx, pady=8)
+        else:
+            group_frame.pack(side=side, fill='both', expand=True, padx=padx, pady=8)
 
-            # Add data
-            for broker, symbol, timestamp in symbols_list:
-                # Format timestamp
-                if timestamp:
-                    try:
-                        dt = datetime.fromtimestamp(timestamp)
-                        time_str = dt.strftime('%H:%M:%S %d/%m/%Y')
-                    except:
-                        time_str = 'N/A'
-                else:
+        # Description
+        ttk.Label(
+            group_frame,
+            text=description,
+            font=('Arial', 8),
+            foreground='#666666'
+        ).pack(anchor='w', pady=(0, 8))
+
+        # ═══════════════════════════════════════════════════════════════
+        # Table with data + Scrollbar
+        # ═══════════════════════════════════════════════════════════════
+
+        # Container frame để tree và scrollbar không bị lệch
+        table_container = ttk.Frame(group_frame)
+        table_container.pack(fill='both', expand=True, pady=(0, 5))
+
+        # Scrollbar - pack TRƯỚC ở bên phải
+        tree_scroll = ttk.Scrollbar(table_container, orient='vertical')
+        tree_scroll.pack(side='right', fill='y')
+
+        # Tree - pack SAU ở bên trái
+        columns = ('Broker', 'Symbol', 'Last Update')
+        tree = ttk.Treeview(
+            table_container,
+            columns=columns,
+            show='headings',
+            height=min(len(symbols_list), 12),
+            yscrollcommand=tree_scroll.set
+        )
+
+        # Configure scrollbar command
+        tree_scroll.config(command=tree.yview)
+
+        tree.heading('Broker', text='Broker')
+        tree.heading('Symbol', text='Symbol')
+        tree.heading('Last Update', text='Last Update')
+
+        tree.column('Broker', width=150, anchor='w')
+        tree.column('Symbol', width=120, anchor='w')
+        tree.column('Last Update', width=150, anchor='center')
+
+        # Add data
+        for broker, symbol, timestamp in symbols_list:
+            # Format timestamp
+            if timestamp:
+                try:
+                    dt = datetime.fromtimestamp(timestamp)
+                    time_str = dt.strftime('%H:%M:%S %d/%m/%Y')
+                except:
                     time_str = 'N/A'
+            else:
+                time_str = 'N/A'
 
-                tree.insert('', 'end', values=(broker, symbol, time_str), tags=(trade_mode.lower(),))
+            tree.insert('', 'end', values=(broker, symbol, time_str), tags=(trade_mode.lower(),))
 
-            # Apply background color
-            tree.tag_configure(trade_mode.lower(), background=mode_colors[trade_mode])
+        # Apply background color
+        tree.tag_configure(trade_mode.lower(), background=color)
 
-            # Pack tree
-            tree.pack(side='left', fill='both', expand=True)
+        # Pack tree
+        tree.pack(side='left', fill='both', expand=True)
 
     
     # ═══ REMOVED: Auto refresh every 5s ═══
