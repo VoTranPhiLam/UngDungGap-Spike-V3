@@ -3146,31 +3146,31 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
 def should_filter_symbol(trade_mode):
     """
     Kiểm tra xem symbol có nên bị lọc không dựa trên trade_mode
-    
-    Lọc bỏ:
+
+    Lọc bỏ (CHỈ 2 LOẠI):
     - DISABLED (Trade: No) = hoàn toàn không cho trade
-    - CLOSEONLY (Trade: Close) = chỉ đóng lệnh, không mở lệnh mới  
-    - UNKNOWN = các mode không xác định
-    
+    - CLOSEONLY (Trade: Close) = chỉ đóng lệnh, không mở lệnh mới
+
     Giữ lại:
     - FULL = full trading
     - LONGONLY = chỉ long
     - SHORTONLY = chỉ short
-    
+    - UNKNOWN = không xác định (GIỮ LẠI vì nhiều sản phẩm UNKNOWN vẫn trade được)
+
     Args:
         trade_mode (str): Trade mode từ EA (DISABLED, CLOSEONLY, FULL, LONGONLY, SHORTONLY, UNKNOWN)
-    
+
     Returns:
         bool: True if should filter (loại bỏ), False if should keep
     """
     if not trade_mode:
-        return True  # No trade_mode = filter
-    
+        return False  # No trade_mode = keep (giữ lại thay vì filter)
+
     trade_mode = trade_mode.upper()
-    
-    # Loại bỏ các trade_mode sau:
-    filtered_modes = ['DISABLED', 'CLOSEONLY', 'UNKNOWN']
-    
+
+    # CHỈ loại bỏ 2 trade_mode sau (bỏ UNKNOWN):
+    filtered_modes = ['DISABLED', 'CLOSEONLY']
+
     return trade_mode in filtered_modes
 
 @app.route('/api/receive_data', methods=['POST'])
@@ -9015,7 +9015,7 @@ Cách sử dụng:
         # Title
         title_label = ttk.Label(
             header_frame,
-            text="🚫 Symbols bị lọc bỏ tự động",
+            text="🚫 Symbols bị lọc bỏ tự động (DISABLED & CLOSEONLY)",
             font=('Arial', 14, 'bold')
         )
         title_label.pack(anchor='w')
@@ -9023,7 +9023,7 @@ Cách sử dụng:
         # Description
         desc_label = ttk.Label(
             header_frame,
-            text="Danh sách symbols không được xử lý do trạng thái trade_mode không cho phép mở lệnh mới",
+            text="Symbols với trade_mode DISABLED (Trade: No) hoặc CLOSEONLY (Trade: Close) bị loại bỏ vì không cho phép mở lệnh mới",
             font=('Arial', 9),
             foreground='#666666'
         )
@@ -9041,8 +9041,7 @@ Cách sử dụng:
 
         legend_items = [
             ("🔴 DISABLED", "#ffcccc", "Trade: No - Hoàn toàn không cho phép trade"),
-            ("🟡 CLOSEONLY", "#ffffcc", "Trade: Close - Chỉ cho phép đóng lệnh"),
-            ("⚪ UNKNOWN", "#e0e0e0", "Trade: Unknown - Trạng thái không xác định")
+            ("🟡 CLOSEONLY", "#ffffcc", "Trade: Close - Chỉ cho phép đóng lệnh")
         ]
 
         for label, color, desc in legend_items:
@@ -9126,19 +9125,17 @@ Cách sử dụng:
             filtered_copy = dict(filtered_symbols)
 
         # ═══════════════════════════════════════════════════════════════════════
-        # Calculate detailed stats
+        # Calculate detailed stats (CHỈ DISABLED & CLOSEONLY)
         # ═══════════════════════════════════════════════════════════════════════
         total_brokers = len(filtered_copy)
         total_filtered = 0
         count_disabled = 0
         count_closeonly = 0
-        count_unknown = 0
 
-        # Count by trade_mode and prepare data structure
+        # Count by trade_mode and prepare data structure (CHỈ 2 loại)
         symbols_by_mode = {
             'DISABLED': [],   # [(broker, symbol, timestamp), ...]
-            'CLOSEONLY': [],
-            'UNKNOWN': []
+            'CLOSEONLY': []
         }
 
         for broker, symbols in filtered_copy.items():
@@ -9153,16 +9150,12 @@ Cách sử dụng:
                 elif trade_mode == 'CLOSEONLY':
                     count_closeonly += 1
                     symbols_by_mode['CLOSEONLY'].append((broker, symbol, timestamp))
-                else:
-                    count_unknown += 1
-                    symbols_by_mode['UNKNOWN'].append((broker, symbol, timestamp))
 
-        # Update stats with breakdown
+        # Update stats with breakdown (CHỈ 2 loại)
         stats_text = f"""Tổng số: {total_filtered} symbols bị lọc từ {total_brokers} broker(s)
 
 ├─ 🔴 DISABLED: {count_disabled} symbols
-├─ 🟡 CLOSEONLY: {count_closeonly} symbols
-└─ ⚪ UNKNOWN: {count_unknown} symbols"""
+└─ 🟡 CLOSEONLY: {count_closeonly} symbols"""
 
         self.filtered_stats_label.config(text=stats_text)
 
@@ -9182,47 +9175,41 @@ Cách sử dụng:
 
             ttk.Label(
                 no_data_frame,
-                text="Tất cả symbols đều có trade_mode hợp lệ (FULL/LONGONLY/SHORTONLY)",
+                text="Tất cả symbols đều có trade_mode hợp lệ (không có DISABLED hoặc CLOSEONLY)",
                 font=('Arial', 10),
                 foreground='gray'
             ).pack(pady=(5, 0))
             return
 
         # ═══════════════════════════════════════════════════════════════════════
-        # Display grouped by TRADE_MODE (2-column layout)
+        # Display: DISABLED (left) + CLOSEONLY (right) - Side by side only
         # ═══════════════════════════════════════════════════════════════════════
         mode_colors = {
             'DISABLED': '#ffcccc',
-            'CLOSEONLY': '#ffffcc',
-            'UNKNOWN': '#e0e0e0'
+            'CLOSEONLY': '#ffffcc'
         }
         mode_icons = {
             'DISABLED': '🔴',
-            'CLOSEONLY': '🟡',
-            'UNKNOWN': '⚪'
+            'CLOSEONLY': '🟡'
         }
         mode_desc = {
             'DISABLED': 'Trade: No - Không cho phép trade',
-            'CLOSEONLY': 'Trade: Close - Chỉ cho phép đóng lệnh',
-            'UNKNOWN': 'Trade: Unknown - Trạng thái không xác định'
+            'CLOSEONLY': 'Trade: Close - Chỉ cho phép đóng lệnh'
         }
 
-        # ═══════════════════════════════════════════════════════════════════════
-        # ROW 1: DISABLED (left) + CLOSEONLY (right) - Side by side
-        # ═══════════════════════════════════════════════════════════════════════
         disabled_list = symbols_by_mode['DISABLED']
         closeonly_list = symbols_by_mode['CLOSEONLY']
 
         if disabled_list or closeonly_list:
             # Container cho 2 cột
-            row1_container = ttk.Frame(self.filtered_content_frame)
-            row1_container.pack(fill='both', expand=True, padx=10, pady=8)
+            row_container = ttk.Frame(self.filtered_content_frame)
+            row_container.pack(fill='both', expand=True, padx=10, pady=8)
 
             # ═══ LEFT COLUMN: DISABLED ═══
             if disabled_list:
                 disabled_list.sort(key=lambda x: (x[0], x[1]))
                 self._create_trade_mode_panel(
-                    row1_container,
+                    row_container,
                     'DISABLED',
                     disabled_list,
                     mode_icons['DISABLED'],
@@ -9236,7 +9223,7 @@ Cách sử dụng:
             if closeonly_list:
                 closeonly_list.sort(key=lambda x: (x[0], x[1]))
                 self._create_trade_mode_panel(
-                    row1_container,
+                    row_container,
                     'CLOSEONLY',
                     closeonly_list,
                     mode_icons['CLOSEONLY'],
@@ -9245,24 +9232,6 @@ Cách sử dụng:
                     side='left',
                     padx=(5, 0)
                 )
-
-        # ═══════════════════════════════════════════════════════════════════════
-        # ROW 2: UNKNOWN (full width below)
-        # ═══════════════════════════════════════════════════════════════════════
-        unknown_list = symbols_by_mode['UNKNOWN']
-        if unknown_list:
-            unknown_list.sort(key=lambda x: (x[0], x[1]))
-            self._create_trade_mode_panel(
-                self.filtered_content_frame,
-                'UNKNOWN',
-                unknown_list,
-                mode_icons['UNKNOWN'],
-                mode_desc['UNKNOWN'],
-                mode_colors['UNKNOWN'],
-                side='top',
-                padx=(10, 10),
-                full_width=True
-            )
 
     def _create_trade_mode_panel(self, parent, trade_mode, symbols_list, icon, description, color, side='top', padx=(0, 0), full_width=False):
         """
