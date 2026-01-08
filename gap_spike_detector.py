@@ -7547,7 +7547,7 @@ class SettingsWindow:
 
         # Tab 6.5: Filtered Symbols (NEW)
         self.create_filtered_symbols_tab()
-        self.auto_refresh_filtered()  # Auto-refresh every 5s
+        # Note: Refresh chỉ khi khởi động và khi restart, không auto 5s
 
         # Tab 7: Tools
         self.create_tools_tab()
@@ -9035,9 +9035,9 @@ Cách sử dụng:
         info_container = ttk.Frame(tab)
         info_container.pack(fill='x', pady=(0, 15))
 
-        # Left: Legend
+        # Left: Legend - Không expand để tránh khoảng trống
         legend_frame = ttk.LabelFrame(info_container, text="📖 Chú thích màu sắc", padding=10)
-        legend_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
+        legend_frame.pack(side='left', fill='y', padx=(0, 10))
 
         legend_items = [
             ("🔴 DISABLED", "#ffcccc", "Trade: No - Hoàn toàn không cho phép trade"),
@@ -9057,9 +9057,9 @@ Cách sử dụng:
             ttk.Label(item_frame, text=label, font=('Arial', 9, 'bold')).pack(side='left')
             ttk.Label(item_frame, text=f"- {desc}", font=('Arial', 8), foreground='gray').pack(side='left', padx=(5, 0))
 
-        # Right: Statistics
+        # Right: Statistics - Không expand
         stats_frame = ttk.LabelFrame(info_container, text="📊 Thống kê", padding=10)
-        stats_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        stats_frame.pack(side='left', fill='y')
 
         self.filtered_stats_label = ttk.Label(
             stats_frame,
@@ -9069,7 +9069,7 @@ Cách sử dụng:
         )
         self.filtered_stats_label.pack(anchor='w')
 
-        # Refresh button
+        # Refresh button - Chỉ refresh manual và khi restart
         btn_frame = ttk.Frame(tab)
         btn_frame.pack(fill='x', pady=(0, 10))
 
@@ -9081,7 +9081,7 @@ Cách sử dụng:
 
         ttk.Label(
             btn_frame,
-            text="(Tự động refresh mỗi 5 giây)",
+            text="(Tự động refresh khi khởi động/restart Python)",
             font=('Arial', 8),
             foreground='gray'
         ).pack(side='left', padx=10)
@@ -9236,15 +9236,29 @@ Cách sử dụng:
             ).pack(anchor='w', pady=(0, 8))
 
             # ═══════════════════════════════════════════════════════════════
-            # Table with data
+            # Table with data + Scrollbar (fix alignment)
             # ═══════════════════════════════════════════════════════════════
+
+            # Container frame để tree và scrollbar không bị lệch
+            table_container = ttk.Frame(group_frame)
+            table_container.pack(fill='x', pady=(0, 5))
+
+            # Scrollbar - pack TRƯỚC ở bên phải
+            tree_scroll = ttk.Scrollbar(table_container, orient='vertical')
+            tree_scroll.pack(side='right', fill='y')
+
+            # Tree - pack SAU ở bên trái
             columns = ('Broker', 'Symbol', 'Last Update')
             tree = ttk.Treeview(
-                group_frame,
+                table_container,
                 columns=columns,
                 show='headings',
-                height=min(len(symbols_list), 12)
+                height=min(len(symbols_list), 12),
+                yscrollcommand=tree_scroll.set
             )
+
+            # Configure scrollbar command
+            tree_scroll.config(command=tree.yview)
 
             tree.heading('Broker', text='Broker')
             tree.heading('Symbol', text='Symbol')
@@ -9271,27 +9285,16 @@ Cách sử dụng:
             # Apply background color
             tree.tag_configure(trade_mode.lower(), background=mode_colors[trade_mode])
 
-            tree.pack(fill='x', pady=(0, 5))
+            # Pack tree
+            tree.pack(side='left', fill='both', expand=True)
 
-            # Add scrollbar if needed
-            if len(symbols_list) > 12:
-                tree_scroll = ttk.Scrollbar(group_frame, orient='vertical', command=tree.yview)
-                tree.configure(yscrollcommand=tree_scroll.set)
-                tree_scroll.pack(side='right', fill='y')
     
-    def auto_refresh_filtered(self):
-        """
-        Auto refresh filtered symbols tab every 5 seconds
-        Chỉ chạy khi Settings window còn mở
-        """
-        if hasattr(self, 'filtered_content_frame'):
-            try:
-                self.refresh_filtered_symbols()
-                # Schedule next refresh sau 5 giây
-                self.window.after(5000, self.auto_refresh_filtered)
-            except:
-                # Window đã đóng hoặc có lỗi
-                pass
+    # ═══ REMOVED: Auto refresh every 5s ═══
+    # Filtered symbols tab chỉ refresh khi:
+    # 1. Khởi động Python
+    # 2. Restart Python (nút restart)
+    # 3. User click nút Refresh manually
+    # def auto_refresh_filtered(self): ...
 
     def create_tools_tab(self):
         """Create Tools tab for Trading Hours & Raw Data"""
