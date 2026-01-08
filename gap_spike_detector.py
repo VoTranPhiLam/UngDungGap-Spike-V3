@@ -7536,8 +7536,8 @@ class SettingsWindow:
         # Tab 3: Gap/Spike Settings
         self.create_gap_spike_settings_tab()
 
-        # Tab 4: Symbol Filter
-        self.create_symbol_filter_tab()
+        # Tab 4: Symbol Filter - REMOVED (không cần thiết)
+        # self.create_symbol_filter_tab()
 
         # Tab 5: Screenshot Settings
         self.create_screenshot_settings_tab()
@@ -9000,172 +9000,282 @@ Cách sử dụng:
     
     def create_filtered_symbols_tab(self):
         """
-        Tab hiển thị danh sách symbols bị lọc bỏ theo từng broker
+        Tab hiển thị danh sách symbols bị lọc bỏ theo trade_mode
         Giúp user kiểm tra xem các symbols bị loại có đúng với ý không
         """
-        tab = ttk.Frame(self.notebook)
+        tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="🚫 Filtered Symbols")
-        
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # HEADER SECTION
+        # ═══════════════════════════════════════════════════════════════════════
+        header_frame = ttk.Frame(tab)
+        header_frame.pack(fill='x', pady=(0, 15))
+
         # Title
-        title_frame = ttk.Frame(tab)
-        title_frame.pack(fill='x', padx=10, pady=10)
-        
         title_label = ttk.Label(
-            title_frame,
-            text="🚫 Symbols bị lọc bỏ (DISABLED/CLOSEONLY/UNKNOWN)",
-            font=('Arial', 12, 'bold')
+            header_frame,
+            text="🚫 Symbols bị lọc bỏ tự động",
+            font=('Arial', 14, 'bold')
         )
-        title_label.pack(side='left')
-        
-        # Info label
-        info_label = ttk.Label(
-            title_frame,
-            text="Các symbols này không được xử lý do trạng thái trade_mode",
+        title_label.pack(anchor='w')
+
+        # Description
+        desc_label = ttk.Label(
+            header_frame,
+            text="Danh sách symbols không được xử lý do trạng thái trade_mode không cho phép mở lệnh mới",
             font=('Arial', 9),
-            foreground='gray'
+            foreground='#666666'
         )
-        info_label.pack(side='left', padx=10)
-        
-        # Refresh button
-        refresh_btn = ttk.Button(
-            title_frame,
-            text="🔄 Refresh",
-            command=lambda: self.refresh_filtered_symbols()
-        )
-        refresh_btn.pack(side='right')
-        
-        # Stats frame
-        stats_frame = ttk.LabelFrame(tab, text="📊 Thống kê", padding=10)
-        stats_frame.pack(fill='x', padx=10, pady=5)
-        
+        desc_label.pack(anchor='w', pady=(3, 0))
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # LEGEND & STATS SECTION
+        # ═══════════════════════════════════════════════════════════════════════
+        info_container = ttk.Frame(tab)
+        info_container.pack(fill='x', pady=(0, 15))
+
+        # Left: Legend
+        legend_frame = ttk.LabelFrame(info_container, text="📖 Chú thích màu sắc", padding=10)
+        legend_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
+
+        legend_items = [
+            ("🔴 DISABLED", "#ffcccc", "Trade: No - Hoàn toàn không cho phép trade"),
+            ("🟡 CLOSEONLY", "#ffffcc", "Trade: Close - Chỉ cho phép đóng lệnh"),
+            ("⚪ UNKNOWN", "#e0e0e0", "Trade: Unknown - Trạng thái không xác định")
+        ]
+
+        for label, color, desc in legend_items:
+            item_frame = ttk.Frame(legend_frame)
+            item_frame.pack(fill='x', pady=2)
+
+            # Color box
+            color_canvas = tk.Canvas(item_frame, width=20, height=20, bg=color, highlightthickness=1, highlightbackground='gray')
+            color_canvas.pack(side='left', padx=(0, 8))
+
+            # Label
+            ttk.Label(item_frame, text=label, font=('Arial', 9, 'bold')).pack(side='left')
+            ttk.Label(item_frame, text=f"- {desc}", font=('Arial', 8), foreground='gray').pack(side='left', padx=(5, 0))
+
+        # Right: Statistics
+        stats_frame = ttk.LabelFrame(info_container, text="📊 Thống kê", padding=10)
+        stats_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
+
         self.filtered_stats_label = ttk.Label(
             stats_frame,
             text="Đang tải...",
-            font=('Arial', 10)
+            font=('Arial', 10),
+            justify='left'
         )
-        self.filtered_stats_label.pack()
-        
-        # Main content frame with scrollbar
+        self.filtered_stats_label.pack(anchor='w')
+
+        # Refresh button
+        btn_frame = ttk.Frame(tab)
+        btn_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Button(
+            btn_frame,
+            text="🔄 Refresh danh sách",
+            command=lambda: self.refresh_filtered_symbols()
+        ).pack(side='left')
+
+        ttk.Label(
+            btn_frame,
+            text="(Tự động refresh mỗi 5 giây)",
+            font=('Arial', 8),
+            foreground='gray'
+        ).pack(side='left', padx=10)
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # CONTENT SECTION (Scrollable)
+        # ═══════════════════════════════════════════════════════════════════════
         content_frame = ttk.Frame(tab)
-        content_frame.pack(fill='both', expand=True, padx=10, pady=5)
-        
+        content_frame.pack(fill='both', expand=True)
+
         # Canvas and scrollbar
-        canvas = tk.Canvas(content_frame, bg='white')
+        canvas = tk.Canvas(content_frame, bg='#f5f5f5', highlightthickness=0)
         scrollbar = ttk.Scrollbar(content_frame, orient='vertical', command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
-        
+
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        
+
         canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
         canvas.configure(yscrollcommand=scrollbar.set)
-        
+
         canvas.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
-        
+
         self.filtered_content_frame = scrollable_frame
-        
+
         # Initial load
         self.refresh_filtered_symbols()
     
     def refresh_filtered_symbols(self):
         """
-        Refresh danh sách filtered symbols
-        Được gọi khi:
-        - Tab được mở lần đầu
-        - User click nút Refresh
-        - Auto-refresh mỗi 5 giây
+        Refresh danh sách filtered symbols với layout cải thiện
         """
         # Clear existing content
         for widget in self.filtered_content_frame.winfo_children():
             widget.destroy()
-        
+
         # Get filtered symbols data (thread-safe)
         with data_lock:
             filtered_copy = dict(filtered_symbols)
-        
-        # Calculate stats
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # Calculate detailed stats
+        # ═══════════════════════════════════════════════════════════════════════
         total_brokers = len(filtered_copy)
-        total_filtered = sum(len(symbols) for symbols in filtered_copy.values())
-        
-        # Update stats
-        self.filtered_stats_label.config(
-            text=f"Tổng số: {total_filtered} symbols bị lọc từ {total_brokers} brokers"
-        )
-        
-        # Display by broker
-        if not filtered_copy:
-            no_data_label = ttk.Label(
-                self.filtered_content_frame,
+        total_filtered = 0
+        count_disabled = 0
+        count_closeonly = 0
+        count_unknown = 0
+
+        # Count by trade_mode and prepare data structure
+        symbols_by_mode = {
+            'DISABLED': [],   # [(broker, symbol, timestamp), ...]
+            'CLOSEONLY': [],
+            'UNKNOWN': []
+        }
+
+        for broker, symbols in filtered_copy.items():
+            for symbol, info in symbols.items():
+                total_filtered += 1
+                trade_mode = info.get('trade_mode', 'UNKNOWN').upper()
+                timestamp = info.get('timestamp', 0)
+
+                if trade_mode == 'DISABLED':
+                    count_disabled += 1
+                    symbols_by_mode['DISABLED'].append((broker, symbol, timestamp))
+                elif trade_mode == 'CLOSEONLY':
+                    count_closeonly += 1
+                    symbols_by_mode['CLOSEONLY'].append((broker, symbol, timestamp))
+                else:
+                    count_unknown += 1
+                    symbols_by_mode['UNKNOWN'].append((broker, symbol, timestamp))
+
+        # Update stats with breakdown
+        stats_text = f"""Tổng số: {total_filtered} symbols bị lọc từ {total_brokers} broker(s)
+
+├─ 🔴 DISABLED: {count_disabled} symbols
+├─ 🟡 CLOSEONLY: {count_closeonly} symbols
+└─ ⚪ UNKNOWN: {count_unknown} symbols"""
+
+        self.filtered_stats_label.config(text=stats_text)
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # Display message if no filtered symbols
+        # ═══════════════════════════════════════════════════════════════════════
+        if total_filtered == 0:
+            no_data_frame = ttk.Frame(self.filtered_content_frame)
+            no_data_frame.pack(expand=True, fill='both', pady=50)
+
+            ttk.Label(
+                no_data_frame,
                 text="✅ Không có symbols bị lọc",
-                font=('Arial', 12),
-                foreground='green'
-            )
-            no_data_label.pack(pady=50)
+                font=('Arial', 14, 'bold'),
+                foreground='#28a745'
+            ).pack()
+
+            ttk.Label(
+                no_data_frame,
+                text="Tất cả symbols đều có trade_mode hợp lệ (FULL/LONGONLY/SHORTONLY)",
+                font=('Arial', 10),
+                foreground='gray'
+            ).pack(pady=(5, 0))
             return
-        
-        for broker in sorted(filtered_copy.keys()):
-            symbols = filtered_copy[broker]
-            
-            if not symbols:
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # Display grouped by TRADE_MODE (sorted order)
+        # ═══════════════════════════════════════════════════════════════════════
+        mode_order = ['DISABLED', 'CLOSEONLY', 'UNKNOWN']
+        mode_colors = {
+            'DISABLED': '#ffcccc',
+            'CLOSEONLY': '#ffffcc',
+            'UNKNOWN': '#e0e0e0'
+        }
+        mode_icons = {
+            'DISABLED': '🔴',
+            'CLOSEONLY': '🟡',
+            'UNKNOWN': '⚪'
+        }
+        mode_desc = {
+            'DISABLED': 'Trade: No - Không cho phép trade',
+            'CLOSEONLY': 'Trade: Close - Chỉ cho phép đóng lệnh',
+            'UNKNOWN': 'Trade: Unknown - Trạng thái không xác định'
+        }
+
+        for trade_mode in mode_order:
+            symbols_list = symbols_by_mode[trade_mode]
+
+            if not symbols_list:
                 continue
-            
-            # Broker frame
-            broker_frame = ttk.LabelFrame(
+
+            # Sort by broker then symbol
+            symbols_list.sort(key=lambda x: (x[0], x[1]))
+
+            # ═══════════════════════════════════════════════════════════════
+            # Group header
+            # ═══════════════════════════════════════════════════════════════
+            group_frame = ttk.LabelFrame(
                 self.filtered_content_frame,
-                text=f"🏦 {broker} ({len(symbols)} symbols)",
+                text=f"{mode_icons[trade_mode]} {trade_mode} - {len(symbols_list)} symbols",
                 padding=10
             )
-            broker_frame.pack(fill='x', pady=5)
-            
-            # Create table
-            columns = ('Symbol', 'Trade Mode', 'Last Update')
+            group_frame.pack(fill='x', padx=10, pady=8)
+
+            # Description
+            ttk.Label(
+                group_frame,
+                text=mode_desc[trade_mode],
+                font=('Arial', 8),
+                foreground='#666666'
+            ).pack(anchor='w', pady=(0, 8))
+
+            # ═══════════════════════════════════════════════════════════════
+            # Table with data
+            # ═══════════════════════════════════════════════════════════════
+            columns = ('Broker', 'Symbol', 'Last Update')
             tree = ttk.Treeview(
-                broker_frame, 
-                columns=columns, 
-                show='headings', 
-                height=min(len(symbols), 10)
+                group_frame,
+                columns=columns,
+                show='headings',
+                height=min(len(symbols_list), 12)
             )
-            
+
+            tree.heading('Broker', text='Broker')
             tree.heading('Symbol', text='Symbol')
-            tree.heading('Trade Mode', text='Trade Mode')
             tree.heading('Last Update', text='Last Update')
-            
-            tree.column('Symbol', width=150)
-            tree.column('Trade Mode', width=150)
-            tree.column('Last Update', width=200)
-            
-            # Add symbols
-            for symbol, info in sorted(symbols.items()):
-                trade_mode = info.get('trade_mode', 'UNKNOWN')
-                timestamp = info.get('timestamp', 0)
-                
+
+            tree.column('Broker', width=200, anchor='w')
+            tree.column('Symbol', width=150, anchor='w')
+            tree.column('Last Update', width=180, anchor='center')
+
+            # Add data
+            for broker, symbol, timestamp in symbols_list:
                 # Format timestamp
                 if timestamp:
                     try:
                         dt = datetime.fromtimestamp(timestamp)
-                        time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                        time_str = dt.strftime('%H:%M:%S %d/%m/%Y')
                     except:
                         time_str = 'N/A'
                 else:
                     time_str = 'N/A'
-                
-                # Color based on trade_mode
-                tag = trade_mode.lower()
-                tree.insert('', 'end', values=(symbol, trade_mode, time_str), tags=(tag,))
-            
-            # Configure tags (màu sắc theo loại trade_mode)
-            tree.tag_configure('disabled', background='#ffcccc')   # Light red
-            tree.tag_configure('closeonly', background='#ffffcc')  # Light yellow
-            tree.tag_configure('unknown', background='#cccccc')    # Gray
-            
-            tree.pack(fill='x')
-            
-            # Scrollbar for tree (nếu có nhiều symbols)
-            if len(symbols) > 10:
-                tree_scroll = ttk.Scrollbar(broker_frame, orient='vertical', command=tree.yview)
+
+                tree.insert('', 'end', values=(broker, symbol, time_str), tags=(trade_mode.lower(),))
+
+            # Apply background color
+            tree.tag_configure(trade_mode.lower(), background=mode_colors[trade_mode])
+
+            tree.pack(fill='x', pady=(0, 5))
+
+            # Add scrollbar if needed
+            if len(symbols_list) > 12:
+                tree_scroll = ttk.Scrollbar(group_frame, orient='vertical', command=tree.yview)
                 tree.configure(yscrollcommand=tree_scroll.set)
                 tree_scroll.pack(side='right', fill='y')
     
