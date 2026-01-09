@@ -7110,52 +7110,106 @@ class RealTimeChartWindow:
                 )
                 return
 
-            # Activate window
-            logger.info(f"[MT4/MT5 Windows] Activating window...")
+            # ═══════════════════════════════════════════════════════════════════
+            # FORCE FOCUS WINDOW - Multiple attempts to ensure window is active
+            # ═══════════════════════════════════════════════════════════════════
+            logger.info(f"[MT4/MT5 Windows] Window state: Minimized={target_window.isMinimized}, Maximized={target_window.isMaximized}, Active={target_window.isActive}")
+
+            # Step 1: Restore if minimized
             if target_window.isMinimized:
+                logger.info("[MT4/MT5 Windows] Restoring minimized window...")
                 target_window.restore()
-                time_module.sleep(0.3)
+                time_module.sleep(0.5)
 
+            # Step 2: Activate window (bring to front)
+            logger.info("[MT4/MT5 Windows] Activating window...")
             target_window.activate()
-            time_module.sleep(0.5)
+            time_module.sleep(0.3)
 
-            # Ctrl+M
-            logger.info("[MT4/MT5 Windows] Ctrl+M")
+            # Step 3: Maximize window to ensure visibility
+            if not target_window.isMaximized:
+                logger.info("[MT4/MT5 Windows] Maximizing window...")
+                try:
+                    target_window.maximize()
+                    time_module.sleep(0.3)
+                except:
+                    logger.warning("[MT4/MT5 Windows] Could not maximize window")
+
+            # Step 4: Force focus by clicking on window center
+            logger.info("[MT4/MT5 Windows] Clicking window to force focus...")
+            try:
+                # Get window position and size
+                win_left = target_window.left
+                win_top = target_window.top
+                win_width = target_window.width
+                win_height = target_window.height
+
+                # Click on center of window
+                center_x = win_left + (win_width // 2)
+                center_y = win_top + (win_height // 2)
+
+                logger.info(f"[MT4/MT5 Windows] Window bounds: left={win_left}, top={win_top}, width={win_width}, height={win_height}")
+                logger.info(f"[MT4/MT5 Windows] Clicking at center: ({center_x}, {center_y})")
+
+                pyautogui.click(center_x, center_y)
+                time_module.sleep(0.5)
+            except Exception as e:
+                logger.warning(f"[MT4/MT5 Windows] Could not click window: {e}")
+
+            # Step 5: Verify window is now active
+            time_module.sleep(0.3)
+            logger.info(f"[MT4/MT5 Windows] Window state after activation: Active={target_window.isActive}")
+
+            if not target_window.isActive:
+                logger.warning("[MT4/MT5 Windows] Window may not be active! Trying one more time...")
+                target_window.activate()
+                time_module.sleep(0.5)
+                pyautogui.click(center_x, center_y)
+                time_module.sleep(0.5)
+
+            # ═══════════════════════════════════════════════════════════════════
+            # NOW SEND KEYBOARD COMMANDS
+            # ═══════════════════════════════════════════════════════════════════
+
+            # Ctrl+M - Open Market Watch
+            logger.info("[MT4/MT5 Windows] Sending Ctrl+M to open Market Watch")
             pyautogui.hotkey('ctrl', 'm')
-            time_module.sleep(0.5)
+            time_module.sleep(0.7)
 
-            # Home
-            logger.info("[MT4/MT5 Windows] Home")
+            # Home - Select first symbol
+            logger.info("[MT4/MT5 Windows] Pressing Home to select first symbol")
             pyautogui.press('home')
+            time_module.sleep(0.4)
+
+            # Type symbol name
+            logger.info(f"[MT4/MT5 Windows] Typing symbol: {symbol_clean}")
+            pyautogui.write(symbol_clean, interval=0.08)
+            time_module.sleep(0.6)
+
+            # Right click - Open context menu
+            logger.info("[MT4/MT5 Windows] Right clicking to open context menu")
+            pyautogui.rightClick()
+            time_module.sleep(0.4)
+
+            # Down arrow x2 - Navigate to "Chart Window"
+            logger.info("[MT4/MT5 Windows] Pressing Down arrow x2 to navigate")
+            pyautogui.press('down')
+            time_module.sleep(0.15)
+            pyautogui.press('down')
             time_module.sleep(0.3)
 
-            # Type symbol
-            logger.info(f"[MT4/MT5 Windows] Type: {symbol_clean}")
-            pyautogui.write(symbol_clean, interval=0.05)
+            # Enter - Open chart
+            logger.info("[MT4/MT5 Windows] Pressing Enter to open chart")
+            pyautogui.press('enter')
             time_module.sleep(0.5)
 
-            # Right click
-            logger.info("[MT4/MT5 Windows] Right click")
-            pyautogui.rightClick()
-            time_module.sleep(0.3)
+            logger.info(f"[MT4/MT5 Windows] Successfully completed automation for {symbol_clean}")
 
-            # Down x2
-            logger.info("[MT4/MT5 Windows] Down x2")
-            pyautogui.press('down')
-            time_module.sleep(0.1)
-            pyautogui.press('down')
-            time_module.sleep(0.2)
-
-            # Enter
-            logger.info("[MT4/MT5 Windows] Enter")
-            pyautogui.press('enter')
-            time_module.sleep(0.3)
-
-            logger.info(f"[MT4/MT5 Windows] Success for {symbol_clean}")
-
+            # Show success message
             messagebox.showinfo(
                 "Thành công",
-                f"Đã gửi lệnh mở chart {symbol_clean} trên MT4/MT5"
+                f"Đã gửi lệnh mở chart {symbol_clean} trên MT4/MT5.\n\n"
+                f"Window: {target_window.title}"
             )
 
         except ImportError as e:
