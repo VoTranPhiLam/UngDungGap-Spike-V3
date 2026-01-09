@@ -7250,16 +7250,15 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_top + 100
 
-            # Type symbol name (MT4/MT5 will auto-scroll to matching symbol)
+            # Type symbol name (MT4/MT5 will auto-scroll and focus on matching symbol)
             logger.info(f"[MT4/MT5 Windows] Typing symbol: {symbol_clean}")
             pyautogui.write(symbol_clean, interval=0.08)
             time_module.sleep(0.6)
 
-            # Right-click on the matched symbol position (using calculated position from Market Watch window)
-            logger.info(f"[MT4/MT5 Windows] Right-clicking on matched symbol at ({symbol_click_x}, {symbol_click_y})")
-            pyautogui.click(symbol_click_x, symbol_click_y)  # Left click first to ensure selection
-            time_module.sleep(0.3)
-            pyautogui.rightClick(symbol_click_x, symbol_click_y)  # Then right click
+            # After typing, MT4/MT5 automatically focuses on the matched symbol
+            # Use Shift+F10 to open context menu on the focused item (no need to click position)
+            logger.info("[MT4/MT5 Windows] Opening context menu with Shift+F10 on focused symbol")
+            pyautogui.hotkey('shift', 'f10')
             time_module.sleep(0.5)
 
             # Down arrow x2 - Navigate to "Chart Window"
@@ -7462,12 +7461,10 @@ class RealTimeChartWindow:
             subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
             time_module.sleep(0.6)
 
-            # Right-click on matched symbol position (using calculated position from Market Watch window)
-            logger.info(f"[MT4/MT5 Linux] Right-clicking on matched symbol at ({symbol_click_x}, {symbol_click_y})")
-            subprocess.run(['xdotool', 'mousemove', str(symbol_click_x), str(symbol_click_y)], timeout=2)
-            subprocess.run(['xdotool', 'click', '1'], timeout=2)  # Left click to select
-            time_module.sleep(0.3)
-            subprocess.run(['xdotool', 'click', '3'], timeout=2)  # Right click
+            # After typing, MT4/MT5 automatically focuses on the matched symbol
+            # Use Shift+F10 to open context menu on the focused item
+            logger.info("[MT4/MT5 Linux] Opening context menu with Shift+F10 on focused symbol")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'shift+F10'], timeout=2)
             time_module.sleep(0.5)
 
             logger.info("[MT4/MT5 Linux] Down x2")
