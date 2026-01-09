@@ -7083,12 +7083,17 @@ class RealTimeChartWindow:
 
             logger.info("[MT4/MT5 Windows] Searching for window...")
 
-            # Find MT4/MT5 window (EXCLUDE Python windows)
+            # Find MT4/MT5 window (EXCLUDE Python chart windows)
+            import re
             all_windows = gw.getAllWindows()
             target_window = None
 
             # Keywords to EXCLUDE (Python/Tkinter windows)
             exclude_keywords = ["python", "tk", "tkinter", "idle", "pycharm", "vscode"]
+
+            # Pattern to detect Python chart windows: "SYMBOL-Broker-Account(M1)" or "(H1)" etc
+            # Timeframes: M1, M5, M15, M30, H1, H4, D1, W1, MN
+            timeframe_pattern = re.compile(r'\([MHDWm][0-9NM]*\)$', re.IGNORECASE)
 
             search_terms = [self.broker, "MetaTrader", "MT4", "MT5", "terminal"]
 
@@ -7100,6 +7105,12 @@ class RealTimeChartWindow:
                     is_python_window = any(excl in title_lower for excl in exclude_keywords)
                     if is_python_window:
                         logger.debug(f"[MT4/MT5 Windows] Skipping Python window: '{window.title}'")
+                        continue
+
+                    # Skip if window title ends with timeframe pattern (Python chart window)
+                    # Example: "ADA-Amakets-Real(M1)" <- Python chart, NOT MT4/MT5 terminal
+                    if timeframe_pattern.search(window.title):
+                        logger.debug(f"[MT4/MT5 Windows] Skipping Python chart window: '{window.title}'")
                         continue
 
                     # Check if window matches search term
@@ -7244,9 +7255,14 @@ class RealTimeChartWindow:
         """Open chart in MT4/MT5 on Linux using xdotool + wmctrl"""
         import subprocess
         import time as time_module
+        import re
 
         # Keywords to EXCLUDE (Python/Tkinter windows)
         exclude_keywords = ["python", "tk", "tkinter", "idle", "pycharm", "vscode"]
+
+        # Pattern to detect Python chart windows: "SYMBOL-Broker-Account(M1)" or "(H1)" etc
+        # Timeframes: M1, M5, M15, M30, H1, H4, D1, W1, MN
+        timeframe_pattern = re.compile(r'\([MHDWm][0-9NM]*\)$', re.IGNORECASE)
 
         search_terms = [self.broker, "MetaTrader", "MT4", "MT5"]
         window_id = None
@@ -7268,6 +7284,12 @@ class RealTimeChartWindow:
                         is_python_window = any(excl in line_lower for excl in exclude_keywords)
                         if is_python_window:
                             logger.debug(f"[MT4/MT5 Linux] Skipping Python window: {line.strip()}")
+                            continue
+
+                        # Skip if line ends with timeframe pattern (Python chart window)
+                        # Example: "ADA-Amakets-Real(M1)" <- Python chart, NOT MT4/MT5 terminal
+                        if timeframe_pattern.search(line):
+                            logger.debug(f"[MT4/MT5 Linux] Skipping Python chart window: {line.strip()}")
                             continue
 
                         # Check if matches search term
