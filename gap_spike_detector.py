@@ -7250,12 +7250,26 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_top + 100
 
-            # Type symbol name (MT4/MT5 will auto-scroll and focus on matching symbol)
-            logger.info(f"[MT4/MT5 Windows] Typing symbol: {symbol_clean}")
-            pyautogui.write(symbol_clean, interval=0.08)
+            # Type symbol name using CLIPBOARD to avoid Vietnamese input method (Telex) interference
+            # Copy symbol to clipboard, then paste with Ctrl+V
+            logger.info(f"[MT4/MT5 Windows] Pasting symbol via clipboard: {symbol_clean}")
+
+            # Save current clipboard content
+            import pyperclip
+            old_clipboard = pyperclip.paste()
+
+            # Copy symbol to clipboard
+            pyperclip.copy(symbol_clean)
+            time_module.sleep(0.1)
+
+            # Paste with Ctrl+V (immune to Vietnamese input methods)
+            pyautogui.hotkey('ctrl', 'v')
             time_module.sleep(0.6)
 
-            # After typing, MT4/MT5 automatically focuses on the matched symbol
+            # Restore old clipboard content
+            pyperclip.copy(old_clipboard)
+
+            # After pasting, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item (no need to click position)
             logger.info("[MT4/MT5 Windows] Opening context menu with Shift+F10 on focused symbol")
             pyautogui.hotkey('shift', 'f10')
@@ -7286,9 +7300,9 @@ class RealTimeChartWindow:
             logger.error(f"[MT4/MT5 Windows] Missing library: {e}")
             messagebox.showerror(
                 "Thiếu thư viện",
-                "Chưa cài đặt pygetwindow hoặc pyautogui.\n\n"
+                "Chưa cài đặt pygetwindow, pyautogui hoặc pyperclip.\n\n"
                 "Cài đặt bằng lệnh:\n"
-                "pip install pygetwindow pyautogui"
+                "pip install pygetwindow pyautogui pyperclip"
             )
         except Exception as e:
             logger.error(f"[MT4/MT5 Windows] Error: {e}")
@@ -7456,12 +7470,39 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_y + 100
 
-            # Type symbol name
-            logger.info(f"[MT4/MT5 Linux] Type: {symbol_clean}")
-            subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
+            # Type symbol name using CLIPBOARD to avoid Vietnamese input method (Telex) interference
+            # Copy symbol to clipboard, then paste with Ctrl+V
+            logger.info(f"[MT4/MT5 Linux] Pasting symbol via clipboard: {symbol_clean}")
+
+            try:
+                # Try to use pyperclip (works on Linux if installed)
+                import pyperclip
+                old_clipboard = pyperclip.paste()
+                pyperclip.copy(symbol_clean)
+                time_module.sleep(0.1)
+            except Exception as e:
+                # Fallback: use xclip directly
+                logger.warning(f"[MT4/MT5 Linux] pyperclip not available, using xclip: {e}")
+                try:
+                    subprocess.run(['xclip', '-selection', 'clipboard'],
+                                 input=symbol_clean.encode(),
+                                 timeout=2)
+                    time_module.sleep(0.1)
+                except Exception as e2:
+                    logger.error(f"[MT4/MT5 Linux] xclip also failed: {e2}")
+
+            # Paste with Ctrl+V (immune to Vietnamese input methods)
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=2)
             time_module.sleep(0.6)
 
-            # After typing, MT4/MT5 automatically focuses on the matched symbol
+            try:
+                # Restore old clipboard if using pyperclip
+                import pyperclip
+                pyperclip.copy(old_clipboard)
+            except:
+                pass
+
+            # After pasting, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item
             logger.info("[MT4/MT5 Linux] Opening context menu with Shift+F10 on focused symbol")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'shift+F10'], timeout=2)
