@@ -7083,29 +7083,45 @@ class RealTimeChartWindow:
 
             logger.info("[MT4/MT5 Windows] Searching for window...")
 
-            # Find MT4/MT5 window
+            # Find MT4/MT5 window (EXCLUDE Python windows)
             all_windows = gw.getAllWindows()
             target_window = None
+
+            # Keywords to EXCLUDE (Python/Tkinter windows)
+            exclude_keywords = ["python", "tk", "tkinter", "idle", "pycharm", "vscode"]
 
             search_terms = [self.broker, "MetaTrader", "MT4", "MT5", "terminal"]
 
             for term in search_terms:
                 for window in all_windows:
-                    if term.lower() in window.title.lower():
+                    title_lower = window.title.lower()
+
+                    # Skip if window title contains Python/Tkinter keywords
+                    is_python_window = any(excl in title_lower for excl in exclude_keywords)
+                    if is_python_window:
+                        logger.debug(f"[MT4/MT5 Windows] Skipping Python window: '{window.title}'")
+                        continue
+
+                    # Check if window matches search term
+                    if term.lower() in title_lower:
                         target_window = window
-                        logger.info(f"[MT4/MT5 Windows] Found window: '{window.title}'")
+                        logger.info(f"[MT4/MT5 Windows] Found MT4/MT5 window: '{window.title}'")
                         break
                 if target_window:
                     break
 
             if not target_window:
-                window_titles = [w.title for w in all_windows if w.title.strip()]
-                logger.warning(f"[MT4/MT5 Windows] Available windows: {window_titles[:10]}")
+                # Filter out Python windows from error message too
+                window_titles = [
+                    w.title for w in all_windows
+                    if w.title.strip() and not any(excl in w.title.lower() for excl in exclude_keywords)
+                ]
+                logger.warning(f"[MT4/MT5 Windows] Available non-Python windows: {window_titles[:10]}")
 
                 messagebox.showerror(
                     "Không tìm thấy window",
                     f"Không tìm thấy window MT4/MT5 cho broker '{self.broker}'.\n\n"
-                    f"Các window đang mở: {', '.join(window_titles[:5])}\n\n"
+                    f"Các window đang mở (không bao gồm Python): {', '.join(window_titles[:5])}\n\n"
                     f"Tìm kiếm: {', '.join(search_terms)}"
                 )
                 return
@@ -7229,6 +7245,9 @@ class RealTimeChartWindow:
         import subprocess
         import time as time_module
 
+        # Keywords to EXCLUDE (Python/Tkinter windows)
+        exclude_keywords = ["python", "tk", "tkinter", "idle", "pycharm", "vscode"]
+
         search_terms = [self.broker, "MetaTrader", "MT4", "MT5"]
         window_id = None
 
@@ -7243,9 +7262,18 @@ class RealTimeChartWindow:
 
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
-                        if term.lower() in line.lower():
+                        line_lower = line.lower()
+
+                        # Skip Python windows
+                        is_python_window = any(excl in line_lower for excl in exclude_keywords)
+                        if is_python_window:
+                            logger.debug(f"[MT4/MT5 Linux] Skipping Python window: {line.strip()}")
+                            continue
+
+                        # Check if matches search term
+                        if term.lower() in line_lower:
                             window_id = line.split()[0]
-                            logger.info(f"[MT4/MT5 Linux] Found: {line.strip()}")
+                            logger.info(f"[MT4/MT5 Linux] Found MT4/MT5 window: {line.strip()}")
                             break
 
                 if window_id:
