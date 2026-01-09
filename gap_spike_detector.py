@@ -7042,178 +7042,209 @@ class RealTimeChartWindow:
 
     def open_chart_in_mt45(self):
         """
-        Mở chart trong MT4/MT5 bằng automation
+        Mở chart trong MT4/MT5 bằng automation (Windows + Linux)
 
         Workflow:
         1. Focus vào window sàn (tìm theo broker name)
         2. Ctrl+M → Mở Market Watch
-        3. Click vào sản phẩm đầu tiên
+        3. Home → Select first symbol
         4. Gõ tên symbol
         5. Chuột phải
         6. Mũi tên xuống 2 lần
         7. Enter
         """
+        import platform
+        import time as time_module
+
+        # Get symbol without suffix (remove .SI, .XX, etc)
+        symbol_clean = self.symbol.split('.')[0]
+
+        logger.info(f"[MT4/MT5] Opening chart for {symbol_clean} on broker {self.broker}")
+        logger.info(f"[MT4/MT5] Detected OS: {platform.system()}")
+
         try:
-            import subprocess
-            import time as time_module
-
-            # Get symbol without suffix (remove .SI, .XX, etc)
-            symbol_clean = self.symbol.split('.')[0]
-
-            logger.info(f"[MT4/MT5] Opening chart for {symbol_clean} on broker {self.broker}")
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 1: Find and focus MT4/MT5 window by broker name
-            # ═══════════════════════════════════════════════════════════════════
-            # Search for window containing broker name or "MetaTrader"
-            search_terms = [self.broker, "MetaTrader", "MT4", "MT5"]
-            window_id = None
-
-            for term in search_terms:
-                try:
-                    # Use wmctrl to find window
-                    result = subprocess.run(
-                        ['wmctrl', '-l'],
-                        capture_output=True,
-                        text=True,
-                        timeout=2
-                    )
-
-                    if result.returncode == 0:
-                        for line in result.stdout.split('\n'):
-                            if term.lower() in line.lower():
-                                window_id = line.split()[0]
-                                logger.info(f"[MT4/MT5] Found window: {line.strip()}")
-                                break
-
-                    if window_id:
-                        break
-                except Exception as e:
-                    logger.warning(f"[MT4/MT5] Failed to search with wmctrl: {e}")
-                    continue
-
-            if not window_id:
-                # Fallback: try xdotool search
-                try:
-                    result = subprocess.run(
-                        ['xdotool', 'search', '--name', self.broker],
-                        capture_output=True,
-                        text=True,
-                        timeout=2
-                    )
-                    if result.returncode == 0 and result.stdout.strip():
-                        window_id = result.stdout.strip().split('\n')[0]
-                        logger.info(f"[MT4/MT5] Found window with xdotool: {window_id}")
-                except Exception as e:
-                    logger.warning(f"[MT4/MT5] Failed to search with xdotool: {e}")
-
-            if not window_id:
-                messagebox.showerror(
-                    "Không tìm thấy window",
-                    f"Không tìm thấy window MT4/MT5 cho broker '{self.broker}'.\n\n"
-                    "Vui lòng đảm bảo:\n"
-                    "1. MT4/MT5 đang chạy\n"
-                    "2. Window title chứa tên broker"
-                )
-                return
-
-            # Focus window
-            logger.info(f"[MT4/MT5] Focusing window {window_id}")
-            subprocess.run(['xdotool', 'windowactivate', '--sync', window_id], timeout=2)
-            time_module.sleep(0.3)
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 2: Ctrl+M to open Market Watch
-            # ═══════════════════════════════════════════════════════════════════
-            logger.info("[MT4/MT5] Sending Ctrl+M to open Market Watch")
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+m'], timeout=2)
-            time_module.sleep(0.5)
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 3: Click on first symbol in Market Watch
-            # ═══════════════════════════════════════════════════════════════════
-            # Get window position to calculate click position
-            try:
-                result = subprocess.run(
-                    ['xdotool', 'getwindowgeometry', window_id],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
-                # Parse window geometry to find Market Watch area (approximate)
-                # Market Watch usually on left side, so we click left-center area
-                logger.info("[MT4/MT5] Clicking on first symbol in Market Watch")
-
-                # Alternative: Use Home key to select first item
-                subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home'], timeout=2)
-                time_module.sleep(0.2)
-
-            except Exception as e:
-                logger.warning(f"[MT4/MT5] Failed to click first symbol: {e}")
-                # Continue anyway, might still work
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 4: Type symbol name
-            # ═══════════════════════════════════════════════════════════════════
-            logger.info(f"[MT4/MT5] Typing symbol: {symbol_clean}")
-            subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
-            time_module.sleep(0.5)
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 5: Right click
-            # ═══════════════════════════════════════════════════════════════════
-            logger.info("[MT4/MT5] Right clicking")
-            subprocess.run(['xdotool', 'click', '3'], timeout=2)
-            time_module.sleep(0.3)
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 6: Down arrow x2
-            # ═══════════════════════════════════════════════════════════════════
-            logger.info("[MT4/MT5] Pressing Down arrow x2")
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
-            time_module.sleep(0.1)
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
-            time_module.sleep(0.2)
-
-            # ═══════════════════════════════════════════════════════════════════
-            # Step 7: Enter
-            # ═══════════════════════════════════════════════════════════════════
-            logger.info("[MT4/MT5] Pressing Enter")
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
-
-            logger.info(f"[MT4/MT5] Successfully opened chart for {symbol_clean}")
-
-            # Show success message
-            messagebox.showinfo(
-                "Thành công",
-                f"Đã gửi lệnh mở chart {symbol_clean} trên MT4/MT5"
-            )
-
-        except subprocess.TimeoutExpired:
-            logger.error("[MT4/MT5] Command timeout")
-            messagebox.showerror(
-                "Timeout",
-                "Lệnh xdotool/wmctrl bị timeout.\n\n"
-                "Vui lòng kiểm tra:\n"
-                "1. xdotool và wmctrl đã được cài đặt\n"
-                "2. Window MT4/MT5 có thể truy cập"
-            )
-        except FileNotFoundError as e:
-            logger.error(f"[MT4/MT5] Tool not found: {e}")
-            messagebox.showerror(
-                "Thiếu công cụ",
-                "Chưa cài đặt xdotool hoặc wmctrl.\n\n"
-                "Cài đặt bằng lệnh:\n"
-                "sudo apt-get install xdotool wmctrl"
-            )
+            if platform.system() == "Windows":
+                self._open_chart_windows(symbol_clean)
+            else:
+                self._open_chart_linux(symbol_clean)
         except Exception as e:
             logger.error(f"[MT4/MT5] Error opening chart: {e}")
             messagebox.showerror(
                 "Lỗi",
                 f"Không thể mở chart trong MT4/MT5.\n\nLỗi: {e}"
             )
-    
+
+    def _open_chart_windows(self, symbol_clean):
+        """Open chart in MT4/MT5 on Windows using pygetwindow + pyautogui"""
+        try:
+            import pygetwindow as gw
+            import pyautogui
+            import time as time_module
+
+            logger.info("[MT4/MT5 Windows] Searching for window...")
+
+            # Find MT4/MT5 window
+            all_windows = gw.getAllWindows()
+            target_window = None
+
+            search_terms = [self.broker, "MetaTrader", "MT4", "MT5", "terminal"]
+
+            for term in search_terms:
+                for window in all_windows:
+                    if term.lower() in window.title.lower():
+                        target_window = window
+                        logger.info(f"[MT4/MT5 Windows] Found window: '{window.title}'")
+                        break
+                if target_window:
+                    break
+
+            if not target_window:
+                window_titles = [w.title for w in all_windows if w.title.strip()]
+                logger.warning(f"[MT4/MT5 Windows] Available windows: {window_titles[:10]}")
+
+                messagebox.showerror(
+                    "Không tìm thấy window",
+                    f"Không tìm thấy window MT4/MT5 cho broker '{self.broker}'.\n\n"
+                    f"Các window đang mở: {', '.join(window_titles[:5])}\n\n"
+                    f"Tìm kiếm: {', '.join(search_terms)}"
+                )
+                return
+
+            # Activate window
+            logger.info(f"[MT4/MT5 Windows] Activating window...")
+            if target_window.isMinimized:
+                target_window.restore()
+                time_module.sleep(0.3)
+
+            target_window.activate()
+            time_module.sleep(0.5)
+
+            # Ctrl+M
+            logger.info("[MT4/MT5 Windows] Ctrl+M")
+            pyautogui.hotkey('ctrl', 'm')
+            time_module.sleep(0.5)
+
+            # Home
+            logger.info("[MT4/MT5 Windows] Home")
+            pyautogui.press('home')
+            time_module.sleep(0.3)
+
+            # Type symbol
+            logger.info(f"[MT4/MT5 Windows] Type: {symbol_clean}")
+            pyautogui.write(symbol_clean, interval=0.05)
+            time_module.sleep(0.5)
+
+            # Right click
+            logger.info("[MT4/MT5 Windows] Right click")
+            pyautogui.rightClick()
+            time_module.sleep(0.3)
+
+            # Down x2
+            logger.info("[MT4/MT5 Windows] Down x2")
+            pyautogui.press('down')
+            time_module.sleep(0.1)
+            pyautogui.press('down')
+            time_module.sleep(0.2)
+
+            # Enter
+            logger.info("[MT4/MT5 Windows] Enter")
+            pyautogui.press('enter')
+            time_module.sleep(0.3)
+
+            logger.info(f"[MT4/MT5 Windows] Success for {symbol_clean}")
+
+            messagebox.showinfo(
+                "Thành công",
+                f"Đã gửi lệnh mở chart {symbol_clean} trên MT4/MT5"
+            )
+
+        except ImportError as e:
+            logger.error(f"[MT4/MT5 Windows] Missing library: {e}")
+            messagebox.showerror(
+                "Thiếu thư viện",
+                "Chưa cài đặt pygetwindow hoặc pyautogui.\n\n"
+                "Cài đặt bằng lệnh:\n"
+                "pip install pygetwindow pyautogui"
+            )
+        except Exception as e:
+            logger.error(f"[MT4/MT5 Windows] Error: {e}")
+            raise
+
+    def _open_chart_linux(self, symbol_clean):
+        """Open chart in MT4/MT5 on Linux using xdotool + wmctrl"""
+        import subprocess
+        import time as time_module
+
+        search_terms = [self.broker, "MetaTrader", "MT4", "MT5"]
+        window_id = None
+
+        for term in search_terms:
+            try:
+                result = subprocess.run(
+                    ['wmctrl', '-l'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if term.lower() in line.lower():
+                            window_id = line.split()[0]
+                            logger.info(f"[MT4/MT5 Linux] Found: {line.strip()}")
+                            break
+
+                if window_id:
+                    break
+            except Exception as e:
+                logger.warning(f"[MT4/MT5 Linux] wmctrl error: {e}")
+                continue
+
+        if not window_id:
+            messagebox.showerror(
+                "Không tìm thấy window",
+                f"Không tìm thấy window MT4/MT5 cho broker '{self.broker}'.\n\n"
+                "Cài đặt: sudo apt-get install xdotool wmctrl"
+            )
+            return
+
+        try:
+            logger.info(f"[MT4/MT5 Linux] Focus {window_id}")
+            subprocess.run(['xdotool', 'windowactivate', '--sync', window_id], timeout=2)
+            time_module.sleep(0.3)
+
+            logger.info("[MT4/MT5 Linux] Ctrl+M")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+m'], timeout=2)
+            time_module.sleep(0.5)
+
+            logger.info("[MT4/MT5 Linux] Home")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home'], timeout=2)
+            time_module.sleep(0.2)
+
+            logger.info(f"[MT4/MT5 Linux] Type: {symbol_clean}")
+            subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
+            time_module.sleep(0.5)
+
+            logger.info("[MT4/MT5 Linux] Right click")
+            subprocess.run(['xdotool', 'click', '3'], timeout=2)
+            time_module.sleep(0.3)
+
+            logger.info("[MT4/MT5 Linux] Down x2")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
+            time_module.sleep(0.1)
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
+            time_module.sleep(0.2)
+
+            logger.info("[MT4/MT5 Linux] Enter")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
+
+            logger.info(f"[MT4/MT5 Linux] Success for {symbol_clean}")
+            messagebox.showinfo("Thành công", f"Đã gửi lệnh mở chart {symbol_clean}")
+
+        except Exception as e:
+            logger.error(f"[MT4/MT5 Linux] Error: {e}")
+            messagebox.showerror("Lỗi", f"Không thể mở chart.\n\nLỗi: {e}")
+
     def draw_candlesticks(self, candles, is_market_open=True):
         """Vẽ candlestick chart"""
         # Clear previous plot
