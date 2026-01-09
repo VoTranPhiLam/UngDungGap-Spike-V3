@@ -7250,26 +7250,60 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_top + 100
 
-            # Type symbol name using CLIPBOARD to avoid Vietnamese input method (Telex) interference
-            # Copy symbol to clipboard, then paste with Ctrl+V
-            logger.info(f"[MT4/MT5 Windows] Pasting symbol via clipboard: {symbol_clean}")
+            # Type symbol name character by character, bypassing Vietnamese input method (Telex)
+            # Use Windows API to send virtual key codes instead of Unicode characters
+            logger.info(f"[MT4/MT5 Windows] Typing symbol (bypass Telex): {symbol_clean}")
 
-            # Save current clipboard content
-            import pyperclip
-            old_clipboard = pyperclip.paste()
+            import ctypes
+            from ctypes import wintypes
 
-            # Copy symbol to clipboard
-            pyperclip.copy(symbol_clean)
-            time_module.sleep(0.1)
+            # Windows Virtual Key codes for A-Z (uppercase)
+            VK_CODES = {
+                'A': 0x41, 'B': 0x42, 'C': 0x43, 'D': 0x44, 'E': 0x45, 'F': 0x46,
+                'G': 0x47, 'H': 0x48, 'I': 0x49, 'J': 0x4A, 'K': 0x4B, 'L': 0x4C,
+                'M': 0x4D, 'N': 0x4E, 'O': 0x4F, 'P': 0x50, 'Q': 0x51, 'R': 0x52,
+                'S': 0x53, 'T': 0x54, 'U': 0x55, 'V': 0x56, 'W': 0x57, 'X': 0x58,
+                'Y': 0x59, 'Z': 0x5A,
+                '0': 0x30, '1': 0x31, '2': 0x32, '3': 0x33, '4': 0x34,
+                '5': 0x35, '6': 0x36, '7': 0x37, '8': 0x38, '9': 0x39
+            }
 
-            # Paste with Ctrl+V (immune to Vietnamese input methods)
-            pyautogui.hotkey('ctrl', 'v')
+            # Define INPUT structure
+            KEYEVENTF_KEYUP = 0x0002
+
+            class INPUT_UNION(ctypes.Union):
+                _fields_ = [("ki", wintypes.KEYBDINPUT)]
+
+            class INPUT(ctypes.Structure):
+                _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
+
+            def send_key(vk_code):
+                """Send virtual key code using SendInput"""
+                # Key down
+                x = INPUT(type=1)  # INPUT_KEYBOARD
+                x.union.ki.wVk = vk_code
+                x.union.ki.wScan = 0
+                x.union.ki.dwFlags = 0
+                x.union.ki.time = 0
+                x.union.ki.dwExtraInfo = 0
+                ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
+                time_module.sleep(0.02)
+
+                # Key up
+                x.union.ki.dwFlags = KEYEVENTF_KEYUP
+                ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
+                time_module.sleep(0.02)
+
+            # Type each character
+            for char in symbol_clean.upper():
+                if char in VK_CODES:
+                    send_key(VK_CODES[char])
+                else:
+                    logger.warning(f"[MT4/MT5 Windows] Unknown character: {char}")
+
             time_module.sleep(0.6)
 
-            # Restore old clipboard content
-            pyperclip.copy(old_clipboard)
-
-            # After pasting, MT4/MT5 automatically focuses on the matched symbol
+            # After typing, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item (no need to click position)
             logger.info("[MT4/MT5 Windows] Opening context menu with Shift+F10 on focused symbol")
             pyautogui.hotkey('shift', 'f10')
@@ -7300,9 +7334,9 @@ class RealTimeChartWindow:
             logger.error(f"[MT4/MT5 Windows] Missing library: {e}")
             messagebox.showerror(
                 "Thiếu thư viện",
-                "Chưa cài đặt pygetwindow, pyautogui hoặc pyperclip.\n\n"
+                "Chưa cài đặt pygetwindow hoặc pyautogui.\n\n"
                 "Cài đặt bằng lệnh:\n"
-                "pip install pygetwindow pyautogui pyperclip"
+                "pip install pygetwindow pyautogui"
             )
         except Exception as e:
             logger.error(f"[MT4/MT5 Windows] Error: {e}")
@@ -7470,39 +7504,21 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_y + 100
 
-            # Type symbol name using CLIPBOARD to avoid Vietnamese input method (Telex) interference
-            # Copy symbol to clipboard, then paste with Ctrl+V
-            logger.info(f"[MT4/MT5 Linux] Pasting symbol via clipboard: {symbol_clean}")
+            # Type symbol name character by character using key codes (bypass Telex)
+            # Use xdotool key to send individual key codes instead of type command
+            logger.info(f"[MT4/MT5 Linux] Typing symbol (bypass Telex): {symbol_clean}")
 
-            try:
-                # Try to use pyperclip (works on Linux if installed)
-                import pyperclip
-                old_clipboard = pyperclip.paste()
-                pyperclip.copy(symbol_clean)
-                time_module.sleep(0.1)
-            except Exception as e:
-                # Fallback: use xclip directly
-                logger.warning(f"[MT4/MT5 Linux] pyperclip not available, using xclip: {e}")
-                try:
-                    subprocess.run(['xclip', '-selection', 'clipboard'],
-                                 input=symbol_clean.encode(),
-                                 timeout=2)
-                    time_module.sleep(0.1)
-                except Exception as e2:
-                    logger.error(f"[MT4/MT5 Linux] xclip also failed: {e2}")
+            # Type each character using xdotool key (sends key events, not text)
+            for char in symbol_clean.upper():
+                if char.isalnum():  # A-Z, 0-9
+                    subprocess.run(['xdotool', 'key', '--clearmodifiers', char], timeout=2)
+                    time_module.sleep(0.04)
+                else:
+                    logger.warning(f"[MT4/MT5 Linux] Unknown character: {char}")
 
-            # Paste with Ctrl+V (immune to Vietnamese input methods)
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=2)
             time_module.sleep(0.6)
 
-            try:
-                # Restore old clipboard if using pyperclip
-                import pyperclip
-                pyperclip.copy(old_clipboard)
-            except:
-                pass
-
-            # After pasting, MT4/MT5 automatically focuses on the matched symbol
+            # After typing, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item
             logger.info("[MT4/MT5 Linux] Opening context menu with Shift+F10 on focused symbol")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'shift+F10'], timeout=2)
