@@ -7201,27 +7201,34 @@ class RealTimeChartWindow:
             # Ctrl+M - Open Market Watch
             logger.info("[MT4/MT5 Windows] Sending Ctrl+M to open Market Watch")
             pyautogui.hotkey('ctrl', 'm')
-            time_module.sleep(0.7)
+            time_module.sleep(0.8)
 
-            # Home - Select first symbol
-            logger.info("[MT4/MT5 Windows] Pressing Home to select first symbol")
-            pyautogui.press('home')
+            # Calculate Market Watch position (usually on the left side of terminal)
+            # Market Watch typically occupies ~15-20% of window width on the left
+            market_watch_width = int(win_width * 0.18)  # 18% of window width
+            market_watch_center_x = win_left + (market_watch_width // 2)
+            market_watch_center_y = win_top + 150  # ~150px from top to avoid title bar
+
+            # Click in the middle of Market Watch to focus
+            logger.info(f"[MT4/MT5 Windows] Clicking Market Watch center at ({market_watch_center_x}, {market_watch_center_y})")
+            pyautogui.click(market_watch_center_x, market_watch_center_y)
             time_module.sleep(0.4)
 
-            # Type symbol name
+            # Type symbol name (MT4/MT5 will auto-scroll to matching symbol)
             logger.info(f"[MT4/MT5 Windows] Typing symbol: {symbol_clean}")
             pyautogui.write(symbol_clean, interval=0.08)
+            time_module.sleep(0.6)
+
+            # Right-click on the matched symbol position (first item in list after typing)
+            # Symbol list starts around 80-100px from window top (below header)
+            symbol_click_x = market_watch_center_x
+            symbol_click_y = win_top + 100  # First symbol position
+
+            logger.info(f"[MT4/MT5 Windows] Right-clicking on matched symbol at ({symbol_click_x}, {symbol_click_y})")
+            pyautogui.click(symbol_click_x, symbol_click_y)  # Left click first to ensure selection
+            time_module.sleep(0.3)
+            pyautogui.rightClick(symbol_click_x, symbol_click_y)  # Then right click
             time_module.sleep(0.5)
-
-            # Enter - Select the matched symbol
-            logger.info("[MT4/MT5 Windows] Pressing Enter to select matched symbol")
-            pyautogui.press('enter')
-            time_module.sleep(0.4)
-
-            # Right click - Open context menu on the selected symbol
-            logger.info("[MT4/MT5 Windows] Right clicking on selected symbol to open context menu")
-            pyautogui.rightClick()
-            time_module.sleep(0.4)
 
             # Down arrow x2 - Navigate to "Chart Window"
             logger.info("[MT4/MT5 Windows] Pressing Down arrow x2 to navigate")
@@ -7322,25 +7329,57 @@ class RealTimeChartWindow:
             subprocess.run(['xdotool', 'windowactivate', '--sync', window_id], timeout=2)
             time_module.sleep(0.3)
 
+            # Get window geometry to calculate Market Watch position
+            result = subprocess.run(
+                ['xdotool', 'getwindowgeometry', window_id],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+
+            # Parse window position and size from output
+            # Example output: "Position: 0,0 (screen: 0)\n  Geometry: 1920x1080"
+            win_x, win_y, win_width, win_height = 0, 0, 1920, 1080  # defaults
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'Position:' in line:
+                        pos_part = line.split('Position:')[1].split('(')[0].strip()
+                        win_x, win_y = map(int, pos_part.split(','))
+                    elif 'Geometry:' in line:
+                        geom_part = line.split('Geometry:')[1].strip()
+                        win_width, win_height = map(int, geom_part.split('x'))
+                logger.info(f"[MT4/MT5 Linux] Window: x={win_x}, y={win_y}, w={win_width}, h={win_height}")
+
             logger.info("[MT4/MT5 Linux] Ctrl+M")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+m'], timeout=2)
-            time_module.sleep(0.5)
+            time_module.sleep(0.8)
 
-            logger.info("[MT4/MT5 Linux] Home")
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home'], timeout=2)
-            time_module.sleep(0.2)
+            # Calculate Market Watch position (left side, ~18% of width)
+            market_watch_width = int(win_width * 0.18)
+            market_watch_center_x = win_x + (market_watch_width // 2)
+            market_watch_center_y = win_y + 150
 
-            logger.info(f"[MT4/MT5 Linux] Type: {symbol_clean}")
-            subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
-            time_module.sleep(0.5)
-
-            logger.info("[MT4/MT5 Linux] Enter to select matched symbol")
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
+            # Click in Market Watch to focus
+            logger.info(f"[MT4/MT5 Linux] Clicking Market Watch at ({market_watch_center_x}, {market_watch_center_y})")
+            subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
+            subprocess.run(['xdotool', 'click', '1'], timeout=2)
             time_module.sleep(0.4)
 
-            logger.info("[MT4/MT5 Linux] Right click on selected symbol")
-            subprocess.run(['xdotool', 'click', '3'], timeout=2)
+            # Type symbol name
+            logger.info(f"[MT4/MT5 Linux] Type: {symbol_clean}")
+            subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
+            time_module.sleep(0.6)
+
+            # Right-click on matched symbol position (first item)
+            symbol_click_x = market_watch_center_x
+            symbol_click_y = win_y + 100
+
+            logger.info(f"[MT4/MT5 Linux] Right-clicking on matched symbol at ({symbol_click_x}, {symbol_click_y})")
+            subprocess.run(['xdotool', 'mousemove', str(symbol_click_x), str(symbol_click_y)], timeout=2)
+            subprocess.run(['xdotool', 'click', '1'], timeout=2)  # Left click to select
             time_module.sleep(0.3)
+            subprocess.run(['xdotool', 'click', '3'], timeout=2)  # Right click
+            time_module.sleep(0.5)
 
             logger.info("[MT4/MT5 Linux] Down x2")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
