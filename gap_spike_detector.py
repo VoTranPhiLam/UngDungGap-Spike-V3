@@ -7211,10 +7211,15 @@ class RealTimeChartWindow:
             # Type symbol name
             logger.info(f"[MT4/MT5 Windows] Typing symbol: {symbol_clean}")
             pyautogui.write(symbol_clean, interval=0.08)
-            time_module.sleep(0.6)
+            time_module.sleep(0.5)
 
-            # Right click - Open context menu
-            logger.info("[MT4/MT5 Windows] Right clicking to open context menu")
+            # Enter - Select the matched symbol
+            logger.info("[MT4/MT5 Windows] Pressing Enter to select matched symbol")
+            pyautogui.press('enter')
+            time_module.sleep(0.4)
+
+            # Right click - Open context menu on the selected symbol
+            logger.info("[MT4/MT5 Windows] Right clicking on selected symbol to open context menu")
             pyautogui.rightClick()
             time_module.sleep(0.4)
 
@@ -7329,7 +7334,11 @@ class RealTimeChartWindow:
             subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
             time_module.sleep(0.5)
 
-            logger.info("[MT4/MT5 Linux] Right click")
+            logger.info("[MT4/MT5 Linux] Enter to select matched symbol")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
+            time_module.sleep(0.4)
+
+            logger.info("[MT4/MT5 Linux] Right click on selected symbol")
             subprocess.run(['xdotool', 'click', '3'], timeout=2)
             time_module.sleep(0.3)
 
