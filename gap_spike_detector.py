@@ -7250,6 +7250,11 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_top + 100
 
+            # Press Home to go to first symbol (clear any previous selection/search)
+            logger.info("[MT4/MT5 Windows] Pressing Home to reset to first symbol")
+            pyautogui.press('home')
+            time_module.sleep(0.3)
+
             # Type symbol name character by character, bypassing Vietnamese input method (Telex)
             # Use Windows API to send virtual key codes instead of Unicode characters
             logger.info(f"[MT4/MT5 Windows] Typing symbol (bypass Telex): {symbol_clean}")
@@ -7514,6 +7519,11 @@ class RealTimeChartWindow:
 
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_y + 100
+
+            # Press Home to go to first symbol (clear any previous selection/search)
+            logger.info("[MT4/MT5 Linux] Pressing Home to reset to first symbol")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home'], timeout=2)
+            time_module.sleep(0.3)
 
             # Type symbol name character by character using key codes (bypass Telex)
             # Use xdotool key to send individual key codes instead of type command
