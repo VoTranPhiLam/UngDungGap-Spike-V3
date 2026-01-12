@@ -7268,11 +7268,22 @@ class RealTimeChartWindow:
                 '5': 0x35, '6': 0x36, '7': 0x37, '8': 0x38, '9': 0x39
             }
 
-            # Define INPUT structure
+            # Define Windows API structures manually
             KEYEVENTF_KEYUP = 0x0002
 
+            # KEYBDINPUT structure
+            class KEYBDINPUT(ctypes.Structure):
+                _fields_ = [
+                    ("wVk", wintypes.WORD),
+                    ("wScan", wintypes.WORD),
+                    ("dwFlags", wintypes.DWORD),
+                    ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.c_ulong)
+                ]
+
+            # INPUT union and structure
             class INPUT_UNION(ctypes.Union):
-                _fields_ = [("ki", wintypes.KEYBDINPUT)]
+                _fields_ = [("ki", KEYBDINPUT)]
 
             class INPUT(ctypes.Structure):
                 _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
