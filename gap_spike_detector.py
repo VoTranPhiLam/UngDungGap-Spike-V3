@@ -7201,7 +7201,7 @@ class RealTimeChartWindow:
             # Ctrl+M - Open Market Watch
             logger.info("[MT4/MT5 Windows] Sending Ctrl+M to open Market Watch")
             pyautogui.hotkey('ctrl', 'm')
-            time_module.sleep(0.8)
+            time_module.sleep(1.5)  # Wait for Market Watch to fully open
 
             # Search for Market Watch window by title
             logger.info("[MT4/MT5 Windows] Searching for 'Market Watch' window...")
@@ -7230,9 +7230,9 @@ class RealTimeChartWindow:
 
                 # Focus and click center of Market Watch
                 market_watch_window.activate()
-                time_module.sleep(0.3)
+                time_module.sleep(0.5)  # Wait for window activation
                 pyautogui.click(market_watch_center_x, market_watch_center_y)
-                time_module.sleep(0.4)
+                time_module.sleep(0.6)  # Wait for focus
 
                 # Use Market Watch position for symbol clicking later
                 symbol_click_x = market_watch_center_x
@@ -7245,7 +7245,7 @@ class RealTimeChartWindow:
                 market_watch_center_y = win_top + 150
 
                 pyautogui.click(market_watch_center_x, market_watch_center_y)
-                time_module.sleep(0.4)
+                time_module.sleep(0.6)  # Wait for focus
 
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_top + 100
@@ -7287,12 +7287,12 @@ class RealTimeChartWindow:
                 x.union.ki.time = 0
                 x.union.ki.dwExtraInfo = 0
                 ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-                time_module.sleep(0.02)
+                time_module.sleep(0.05)  # Slower key down
 
                 # Key up
                 x.union.ki.dwFlags = KEYEVENTF_KEYUP
                 ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-                time_module.sleep(0.02)
+                time_module.sleep(0.05)  # Slower key up
 
             # Type each character
             for char in symbol_clean.upper():
@@ -7301,25 +7301,25 @@ class RealTimeChartWindow:
                 else:
                     logger.warning(f"[MT4/MT5 Windows] Unknown character: {char}")
 
-            time_module.sleep(0.6)
+            time_module.sleep(1.0)  # Wait for Market Watch to search and focus matched symbol
 
             # After typing, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item (no need to click position)
             logger.info("[MT4/MT5 Windows] Opening context menu with Shift+F10 on focused symbol")
             pyautogui.hotkey('shift', 'f10')
-            time_module.sleep(0.5)
+            time_module.sleep(0.8)  # Wait for context menu to open
 
             # Down arrow x2 - Navigate to "Chart Window"
             logger.info("[MT4/MT5 Windows] Pressing Down arrow x2 to navigate")
             pyautogui.press('down')
-            time_module.sleep(0.15)
+            time_module.sleep(0.3)  # Wait after first down
             pyautogui.press('down')
-            time_module.sleep(0.3)
+            time_module.sleep(0.5)  # Wait after second down
 
             # Enter - Open chart
             logger.info("[MT4/MT5 Windows] Pressing Enter to open chart")
             pyautogui.press('enter')
-            time_module.sleep(0.5)
+            time_module.sleep(0.8)  # Wait for chart to open
 
             logger.info(f"[MT4/MT5 Windows] Successfully completed automation for {symbol_clean}")
 
@@ -7431,7 +7431,7 @@ class RealTimeChartWindow:
 
             logger.info("[MT4/MT5 Linux] Ctrl+M")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+m'], timeout=2)
-            time_module.sleep(0.8)
+            time_module.sleep(1.5)  # Wait for Market Watch to fully open
 
             # Search for Market Watch window by title
             logger.info("[MT4/MT5 Linux] Searching for 'Market Watch' window...")
@@ -7480,12 +7480,12 @@ class RealTimeChartWindow:
 
                 # Focus and click Market Watch center
                 subprocess.run(['xdotool', 'windowactivate', '--sync', market_watch_id], timeout=2)
-                time_module.sleep(0.3)
+                time_module.sleep(0.5)  # Wait for window activation
 
                 logger.info(f"[MT4/MT5 Linux] Clicking Market Watch center at ({market_watch_center_x}, {market_watch_center_y})")
                 subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
                 subprocess.run(['xdotool', 'click', '1'], timeout=2)
-                time_module.sleep(0.4)
+                time_module.sleep(0.6)  # Wait for focus
 
                 # Use Market Watch position for symbol clicking
                 symbol_click_x = market_watch_center_x
@@ -7499,7 +7499,7 @@ class RealTimeChartWindow:
 
                 subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
                 subprocess.run(['xdotool', 'click', '1'], timeout=2)
-                time_module.sleep(0.4)
+                time_module.sleep(0.6)  # Wait for focus
 
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_y + 100
@@ -7512,26 +7512,27 @@ class RealTimeChartWindow:
             for char in symbol_clean.upper():
                 if char.isalnum():  # A-Z, 0-9
                     subprocess.run(['xdotool', 'key', '--clearmodifiers', char], timeout=2)
-                    time_module.sleep(0.04)
+                    time_module.sleep(0.08)  # Slower typing for reliability
                 else:
                     logger.warning(f"[MT4/MT5 Linux] Unknown character: {char}")
 
-            time_module.sleep(0.6)
+            time_module.sleep(1.0)  # Wait for Market Watch to search and focus matched symbol
 
             # After typing, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item
             logger.info("[MT4/MT5 Linux] Opening context menu with Shift+F10 on focused symbol")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'shift+F10'], timeout=2)
-            time_module.sleep(0.5)
+            time_module.sleep(0.8)  # Wait for context menu to open
 
             logger.info("[MT4/MT5 Linux] Down x2")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
-            time_module.sleep(0.1)
+            time_module.sleep(0.3)  # Wait after first down
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
-            time_module.sleep(0.2)
+            time_module.sleep(0.5)  # Wait after second down
 
             logger.info("[MT4/MT5 Linux] Enter")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
+            time_module.sleep(0.8)  # Wait for chart to open
 
             logger.info(f"[MT4/MT5 Linux] Success for {symbol_clean}")
             messagebox.showinfo("Thành công", f"Đã gửi lệnh mở chart {symbol_clean}")
