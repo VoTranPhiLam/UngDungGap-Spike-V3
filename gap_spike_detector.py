@@ -7250,8 +7250,18 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_top + 100
 
-            # Press Home to go to first symbol (clear any previous selection/search)
-            logger.info("[MT4/MT5 Windows] Pressing Home to reset to first symbol")
+            # Clear any previous search text and reset to first symbol
+            logger.info("[MT4/MT5 Windows] Clearing previous search text")
+
+            # Ctrl+A to select all text in search box
+            pyautogui.hotkey('ctrl', 'a')
+            time_module.sleep(0.2)
+
+            # Delete to clear selected text
+            pyautogui.press('delete')
+            time_module.sleep(0.2)
+
+            # Press Home to go to first symbol
             pyautogui.press('home')
             time_module.sleep(0.3)
 
@@ -7520,8 +7530,18 @@ class RealTimeChartWindow:
                 symbol_click_x = market_watch_center_x
                 symbol_click_y = win_y + 100
 
-            # Press Home to go to first symbol (clear any previous selection/search)
-            logger.info("[MT4/MT5 Linux] Pressing Home to reset to first symbol")
+            # Clear any previous search text and reset to first symbol
+            logger.info("[MT4/MT5 Linux] Clearing previous search text")
+
+            # Ctrl+A to select all text in search box
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+a'], timeout=2)
+            time_module.sleep(0.2)
+
+            # Delete to clear selected text
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Delete'], timeout=2)
+            time_module.sleep(0.2)
+
+            # Press Home to go to first symbol
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home'], timeout=2)
             time_module.sleep(0.3)
 
