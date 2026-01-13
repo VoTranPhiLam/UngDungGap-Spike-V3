@@ -7060,22 +7060,7 @@ class RealTimeChartWindow:
         import time as time_module
 
         # Get symbol without suffix (remove .SI, .XX, etc)
-        logger.info(f"[MT4/MT5] 🔍 DEBUG - Original symbol: '{self.symbol}' (type={type(self.symbol).__name__})")
         symbol_clean = self.symbol.split('.')[0]
-        logger.info(f"[MT4/MT5] 🔍 DEBUG - Cleaned symbol: '{symbol_clean}' (length={len(symbol_clean)})")
-
-        # Show debug popup with symbol info
-        from tkinter import messagebox as mb
-        mb.showinfo(
-            "🔍 DEBUG - Symbol Info",
-            f"Thông tin Symbol:\n\n"
-            f"Symbol gốc: {self.symbol}\n"
-            f"Symbol clean: {symbol_clean}\n"
-            f"Broker: {self.broker}\n"
-            f"Độ dài: {len(symbol_clean)} ký tự\n\n"
-            f"Nhấn OK để tiếp tục..."
-        )
-
         logger.info(f"[MT4/MT5] Opening chart for {symbol_clean} on broker {self.broker}")
         logger.info(f"[MT4/MT5] Detected OS: {platform.system()}")
 
@@ -7285,18 +7270,7 @@ class RealTimeChartWindow:
             # Type symbol name character by character, bypassing Vietnamese input method (Telex)
             # Use Windows API to send virtual key codes instead of Unicode characters
             symbol_upper = symbol_clean.upper()
-            logger.info(f"[MT4/MT5 Windows] ===== TYPING SYMBOL: '{symbol_upper}' (length={len(symbol_upper)}) =====")
-
-            # Show debug popup with symbol that will be typed
-            from tkinter import messagebox as mb
-            mb.showinfo(
-                "🔍 DEBUG - Symbol Typing",
-                f"Sẽ nhập vào Market Watch:\n\n"
-                f"Symbol: {symbol_upper}\n"
-                f"Độ dài: {len(symbol_upper)} ký tự\n"
-                f"Các ký tự: {' - '.join(list(symbol_upper))}\n\n"
-                f"Nhấn OK để tiếp tục..."
-            )
+            logger.info(f"[MT4/MT5 Windows] Typing symbol: '{symbol_upper}'")
 
             import ctypes
             from ctypes import wintypes
@@ -7332,10 +7306,8 @@ class RealTimeChartWindow:
             class INPUT(ctypes.Structure):
                 _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
 
-            def send_key(vk_code, char_name):
+            def send_key(vk_code):
                 """Send virtual key code using SendInput"""
-                logger.info(f"[MT4/MT5 Windows] → Typing character: '{char_name}' (VK=0x{vk_code:02X})")
-
                 # Key down
                 x = INPUT(type=1)  # INPUT_KEYBOARD
                 x.union.ki.wVk = vk_code
@@ -7344,25 +7316,22 @@ class RealTimeChartWindow:
                 x.union.ki.time = 0
                 x.union.ki.dwExtraInfo = 0
                 ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-                time_module.sleep(0.08)  # Slower for visibility
+                time_module.sleep(0.01)  # Fast typing
 
                 # Key up
                 x.union.ki.dwFlags = KEYEVENTF_KEYUP
                 ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-                time_module.sleep(0.08)  # Slower for visibility
+                time_module.sleep(0.01)  # Fast typing
 
-            # Type each character with detailed logging
-            typed_chars = []
-            for i, char in enumerate(symbol_upper):
+            # Type each character rapidly
+            for char in symbol_upper:
                 if char in VK_CODES:
-                    send_key(VK_CODES[char], char)
-                    typed_chars.append(char)
-                    logger.info(f"[MT4/MT5 Windows] Progress: {''.join(typed_chars)} ({i+1}/{len(symbol_upper)})")
+                    send_key(VK_CODES[char])
                 else:
-                    logger.warning(f"[MT4/MT5 Windows] ❌ Unknown character: '{char}' (skipped)")
+                    logger.warning(f"[MT4/MT5 Windows] Unknown character: '{char}'")
 
-            logger.info(f"[MT4/MT5 Windows] ===== FINISHED TYPING: '{''.join(typed_chars)}' =====")
-            time_module.sleep(1.0)  # Wait for Market Watch to search and focus matched symbol
+            logger.info(f"[MT4/MT5 Windows] Finished typing: '{symbol_upper}'")
+            time_module.sleep(0.8)  # Wait for Market Watch to search and focus matched symbol
 
             # After typing, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item (no need to click position)
@@ -7583,32 +7552,18 @@ class RealTimeChartWindow:
             # Type symbol name character by character using key codes (bypass Telex)
             # Use xdotool key to send individual key codes instead of type command
             symbol_upper = symbol_clean.upper()
-            logger.info(f"[MT4/MT5 Linux] ===== TYPING SYMBOL: '{symbol_upper}' (length={len(symbol_upper)}) =====")
+            logger.info(f"[MT4/MT5 Linux] Typing symbol: '{symbol_upper}'")
 
-            # Show debug popup with symbol that will be typed
-            messagebox.showinfo(
-                "🔍 DEBUG - Symbol Typing",
-                f"Sẽ nhập vào Market Watch:\n\n"
-                f"Symbol: {symbol_upper}\n"
-                f"Độ dài: {len(symbol_upper)} ký tự\n"
-                f"Các ký tự: {' - '.join(list(symbol_upper))}\n\n"
-                f"Nhấn OK để tiếp tục..."
-            )
-
-            # Type each character using xdotool key (sends key events, not text)
-            typed_chars = []
-            for i, char in enumerate(symbol_upper):
+            # Type each character rapidly using xdotool key (sends key events, not text)
+            for char in symbol_upper:
                 if char.isalnum():  # A-Z, 0-9
-                    logger.info(f"[MT4/MT5 Linux] → Typing character: '{char}'")
                     subprocess.run(['xdotool', 'key', '--clearmodifiers', char], timeout=2)
-                    typed_chars.append(char)
-                    logger.info(f"[MT4/MT5 Linux] Progress: {''.join(typed_chars)} ({i+1}/{len(symbol_upper)})")
-                    time_module.sleep(0.08)  # Slower typing for reliability
+                    time_module.sleep(0.01)  # Fast typing
                 else:
-                    logger.warning(f"[MT4/MT5 Linux] ❌ Unknown character: '{char}' (skipped)")
+                    logger.warning(f"[MT4/MT5 Linux] Unknown character: '{char}'")
 
-            logger.info(f"[MT4/MT5 Linux] ===== FINISHED TYPING: '{''.join(typed_chars)}' =====")
-            time_module.sleep(1.0)  # Wait for Market Watch to search and focus matched symbol
+            logger.info(f"[MT4/MT5 Linux] Finished typing: '{symbol_upper}'")
+            time_module.sleep(0.8)  # Wait for Market Watch to search and focus matched symbol
 
             # After typing, MT4/MT5 automatically focuses on the matched symbol
             # Use Shift+F10 to open context menu on the focused item
