@@ -7223,28 +7223,28 @@ class RealTimeChartWindow:
                 mw_width = market_watch_window.width
                 mw_height = market_watch_window.height
 
-                # Click on CENTER of Market Watch window
-                # MT4/MT5 will auto-focus search when typing
+                # Click on SYMBOL LIST area (not center, not search box)
+                # Symbol list starts below search box at ~50px from top
                 market_watch_center_x = mw_left + (mw_width // 2)
-                market_watch_center_y = mw_top + (mw_height // 2)
+                market_watch_list_y = mw_top + 80  # Click on first visible symbol in list
 
                 logger.info(f"[MT4/MT5 Windows] Market Watch bounds: left={mw_left}, top={mw_top}, width={mw_width}, height={mw_height}")
-                logger.info(f"[MT4/MT5 Windows] Clicking Market Watch center at ({market_watch_center_x}, {market_watch_center_y})")
+                logger.info(f"[MT4/MT5 Windows] Clicking Market Watch symbol list at ({market_watch_center_x}, {market_watch_list_y})")
 
-                # Focus and click center of Market Watch
+                # Focus and click on symbol list area
                 market_watch_window.activate()
-                time_module.sleep(0.5)  # Wait for window activation
-                pyautogui.click(market_watch_center_x, market_watch_center_y)
-                time_module.sleep(0.3)  # Wait for focus
+                time_module.sleep(0.3)  # Wait for window activation
+                pyautogui.click(market_watch_center_x, market_watch_list_y)
+                time_module.sleep(0.4)  # Wait for focus in symbol list
             else:
-                # Fallback: Calculate Market Watch position within main terminal (legacy behavior)
+                # Fallback: Calculate Market Watch position within main terminal
                 logger.warning("[MT4/MT5 Windows] Market Watch window not found, using fallback position")
                 market_watch_width = int(win_width * 0.18)
                 market_watch_center_x = win_left + (market_watch_width // 2)
-                market_watch_center_y = win_top + 150
+                market_watch_list_y = win_top + 120  # Click on symbol list area
 
-                pyautogui.click(market_watch_center_x, market_watch_center_y)
-                time_module.sleep(0.3)  # Wait for focus
+                pyautogui.click(market_watch_center_x, market_watch_list_y)
+                time_module.sleep(0.4)  # Wait for focus in symbol list
 
             # Press Home to select first symbol in list
             logger.info("[MT4/MT5 Windows] Pressing Home to select first symbol")
@@ -7488,29 +7488,29 @@ class RealTimeChartWindow:
                             mw_width, mw_height = map(int, geom_part.split('x'))
                     logger.info(f"[MT4/MT5 Linux] Market Watch: x={mw_x}, y={mw_y}, w={mw_width}, h={mw_height}")
 
-                # Click on CENTER of Market Watch window
-                # MT4/MT5 will auto-focus search when typing
+                # Click on SYMBOL LIST area (not center, not search box)
+                # Symbol list starts below search box at ~50px from top
                 market_watch_center_x = mw_x + (mw_width // 2)
-                market_watch_center_y = mw_y + (mw_height // 2)
+                market_watch_list_y = mw_y + 80  # Click on first visible symbol in list
 
-                # Focus and click center of Market Watch
+                # Focus and click on symbol list area
                 subprocess.run(['xdotool', 'windowactivate', '--sync', market_watch_id], timeout=2)
-                time_module.sleep(0.5)  # Wait for window activation
+                time_module.sleep(0.3)  # Wait for window activation
 
-                logger.info(f"[MT4/MT5 Linux] Clicking Market Watch center at ({market_watch_center_x}, {market_watch_center_y})")
-                subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
+                logger.info(f"[MT4/MT5 Linux] Clicking Market Watch symbol list at ({market_watch_center_x}, {market_watch_list_y})")
+                subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_list_y)], timeout=2)
                 subprocess.run(['xdotool', 'click', '1'], timeout=2)
-                time_module.sleep(0.3)  # Wait for focus
+                time_module.sleep(0.4)  # Wait for focus in symbol list
             else:
                 # Fallback: Calculate Market Watch position within main terminal
                 logger.warning("[MT4/MT5 Linux] Market Watch window not found, using fallback position")
                 market_watch_width = int(win_width * 0.18)
                 market_watch_center_x = win_x + (market_watch_width // 2)
-                market_watch_center_y = win_y + 150
+                market_watch_list_y = win_y + 120  # Click on symbol list area
 
-                subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
+                subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_list_y)], timeout=2)
                 subprocess.run(['xdotool', 'click', '1'], timeout=2)
-                time_module.sleep(0.3)  # Wait for focus
+                time_module.sleep(0.4)  # Wait for focus in symbol list
 
             # Press Home to select first symbol in list
             logger.info("[MT4/MT5 Linux] Pressing Home to select first symbol")
