@@ -7249,7 +7249,7 @@ class RealTimeChartWindow:
             # Press Home to select first symbol in list
             logger.info("[MT4/MT5 Windows] Pressing Home to select first symbol")
             pyautogui.press('home')
-            time_module.sleep(0.2)
+            time_module.sleep(0.5)  # Wait before typing
 
             # Type symbol name character by character, bypassing Vietnamese input method (Telex)
             # Use Windows API to send virtual key codes instead of Unicode characters
@@ -7300,17 +7300,18 @@ class RealTimeChartWindow:
                 x.union.ki.time = 0
                 x.union.ki.dwExtraInfo = 0
                 ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-                time_module.sleep(0.01)  # Fast typing
+                time_module.sleep(0.05)  # Key down delay
 
                 # Key up
                 x.union.ki.dwFlags = KEYEVENTF_KEYUP
                 ctypes.windll.user32.SendInput(1, ctypes.byref(x), ctypes.sizeof(x))
-                time_module.sleep(0.01)  # Fast typing
+                time_module.sleep(0.05)  # Key up delay
 
-            # Type each character rapidly
+            # Type each character with 0.1s delay between characters
             for char in symbol_upper:
                 if char in VK_CODES:
                     send_key(VK_CODES[char])
+                    time_module.sleep(0.1)  # 0.1s delay after each character
                 else:
                     logger.warning(f"[MT4/MT5 Windows] Unknown character: '{char}'")
 
@@ -7514,18 +7515,18 @@ class RealTimeChartWindow:
             # Press Home to select first symbol in list
             logger.info("[MT4/MT5 Linux] Pressing Home to select first symbol")
             subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home'], timeout=2)
-            time_module.sleep(0.2)
+            time_module.sleep(0.5)  # Wait before typing
 
             # Type symbol name character by character using key codes (bypass Telex)
             # Use xdotool key to send individual key codes instead of type command
             symbol_upper = symbol_clean.upper()
             logger.info(f"[MT4/MT5 Linux] Typing symbol: '{symbol_upper}'")
 
-            # Type each character rapidly using xdotool key (sends key events, not text)
+            # Type each character with 0.1s delay between characters
             for char in symbol_upper:
                 if char.isalnum():  # A-Z, 0-9
                     subprocess.run(['xdotool', 'key', '--clearmodifiers', char], timeout=2)
-                    time_module.sleep(0.01)  # Fast typing
+                    time_module.sleep(0.1)  # 0.1s delay after each character
                 else:
                     logger.warning(f"[MT4/MT5 Linux] Unknown character: '{char}'")
 
