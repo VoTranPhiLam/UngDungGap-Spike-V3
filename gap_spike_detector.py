@@ -7315,12 +7315,7 @@ class RealTimeChartWindow:
                     logger.warning(f"[MT4/MT5 Windows] Unknown character: '{char}'")
 
             logger.info(f"[MT4/MT5 Windows] Finished typing: '{symbol_upper}'")
-            time_module.sleep(0.3)  # Wait for search to find symbol
-
-            # Press Enter to confirm focus on matched symbol
-            logger.info("[MT4/MT5 Windows] Pressing Enter to confirm symbol selection")
-            pyautogui.press('enter')
-            time_module.sleep(0.3)
+            time_module.sleep(0.5)  # Wait for Market Watch to filter to matched symbol
 
             # Shift+F10 to open context menu on focused symbol
             logger.info("[MT4/MT5 Windows] Opening context menu with Shift+F10")
@@ -7535,12 +7530,7 @@ class RealTimeChartWindow:
                     logger.warning(f"[MT4/MT5 Linux] Unknown character: '{char}'")
 
             logger.info(f"[MT4/MT5 Linux] Finished typing: '{symbol_upper}'")
-            time_module.sleep(0.3)  # Wait for search to find symbol
-
-            # Press Enter to confirm focus on matched symbol
-            logger.info("[MT4/MT5 Linux] Pressing Enter to confirm symbol selection")
-            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
-            time_module.sleep(0.3)
+            time_module.sleep(0.5)  # Wait for Market Watch to filter to matched symbol
 
             # Shift+F10 to open context menu on focused symbol
             logger.info("[MT4/MT5 Linux] Opening context menu with Shift+F10")
