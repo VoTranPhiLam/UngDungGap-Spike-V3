@@ -58,8 +58,8 @@ market_data = {}  # {broker: {symbol: data}}
 gap_settings = {}  # {symbol: threshold%} or {broker_symbol: threshold%}
 spike_settings = {}  # {symbol: threshold%} or {broker_symbol: threshold%}
 
-DEFAULT_GAP_THRESHOLD = 0.3
-DEFAULT_SPIKE_THRESHOLD = 1.3
+DEFAULT_GAP_THRESHOLD = 0.9
+DEFAULT_SPIKE_THRESHOLD = 1.6
 
 # Custom thresholds (user-defined overrides)
 # Format: {broker_symbol: {'gap_point': float, 'gap_percent': float, 'spike_percent': float}}
@@ -89,8 +89,8 @@ last_data_snapshot = {
 }
 
 delay_settings = {
-    'threshold': 180,  # Default delay threshold in seconds
-    'auto_hide_time': 3600  # Auto hide after 60 minutes
+    'threshold': 300,  # ✨ Default delay threshold in seconds (5 minutes)
+    'auto_hide_time': 3000  # ✨ Auto hide after 50 minutes
 }
 
 # Product-specific delay settings (in minutes)
@@ -103,17 +103,26 @@ product_delay_settings = {}
 # Example: ["RadexMarkets-Live_XAUUSD", "FXPrimus-Server_EURUSD"]
 hidden_products = []
 
+# ✨ NEW: Filtered symbols by trade_mode (DISABLED/CLOSEONLY/UNKNOWN)
+filtered_symbols = {}  # {broker: {symbol: {'trade_mode': str, 'timestamp': int}}}
+
 screenshot_settings = {
     'enabled': True,  # Auto screenshot when gap/spike detected
     'save_gap': True,  # Save screenshot for gap
     'save_spike': True,  # Save screenshot for spike
     'folder': 'pictures',  # Folder to save screenshots
     'assigned_name': '',  # Selected name for Picture Gallery exports
-    'startup_delay_minutes': 5  # Delay in minutes before screenshot starts working after startup
+    'startup_delay_minutes': 5,  # Delay in minutes before screenshot starts working after startup
+    'auto_delete_enabled': False,  # Enable auto-delete old screenshots
+    'auto_delete_hours': 48  # Delete screenshots older than X hours
 }
 
 # Track application startup time for screenshot delay
 app_startup_time = time.time()
+
+# Track last auto-delete time
+last_auto_delete_time = 0
+AUTO_DELETE_INTERVAL = 3600  # Run auto-delete every 1 hour
 
 # ===================== AUDIO ALERT SETTINGS =====================
 audio_settings = {
@@ -140,13 +149,6 @@ symbol_filter_settings = {
 
 SYMBOL_FILTER_FILE = 'symbol_filter_settings.json'
 
-# Broker selection settings (cho phép chọn sàn khi khởi động)
-broker_selection_settings = {
-    'enabled_brokers': []  # Danh sách các broker được chọn để kết nối
-}
-
-BROKER_SELECTION_FILE = 'broker_selection_settings.json'
-
 PICTURE_ASSIGNEE_CHOICES = [
     '',  # Allow clearing selection
     'Tâm',
@@ -166,10 +168,13 @@ auto_send_settings = {
     'enabled': False,  # Enable auto-send when screenshot is captured
     'sheet_url': '',  # Google Sheet URL (user will fill this)
     'sheet_name': '',  # Sheet tab name (e.g., "Sheet1", "Data")
+    'attendance_sheet_name': 'Điểm danh',  # ✨ Sheet tab cho điểm danh (mặc định: "Điểm danh")
     'start_column': 'A',  # Column to start writing data (e.g., A, B, C)
     'columns': {  # Column mapping - which data to send
         'assignee': True,
-        'time': True,
+        'send_time': True,  # Thời gian gửi (local time khi bấm hoàn thành)
+        'note': True,  # Note: Luôn hiển thị "KÉO SÀN"
+        'time': True,  # Server time từ MT4/MT5
         'broker': True,
         'symbol': True,
         'type': True,  # Gap/Spike/Both
@@ -184,11 +189,31 @@ python_reset_settings = {
 
 PYTHON_RESET_SETTINGS_FILE = 'python_reset_settings.json'
 
+# ===================== HELPER FUNCTIONS FOR FILE PATHS =====================
+def get_application_path():
+    """
+    ✨ Get the directory where the application (exe or .py) is located.
+    - When running as PyInstaller exe: Returns the directory of the exe file
+    - When running as Python script: Returns the directory of the script
+
+    This ensures credentials.json stays OUTSIDE the exe for easy modification.
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller exe
+        # sys.executable is the path to the exe
+        return os.path.dirname(sys.executable)
+    else:
+        # Running as Python script
+        return os.path.dirname(os.path.abspath(__file__))
+
 # Google Sheets integration
 accepted_screenshots = []  # List of accepted screenshots to send to Google Sheets
 GOOGLE_SHEET_NAME = "Chấm công TestSanPython"  # Name of the Google Sheet
-CREDENTIALS_FILE = "credentials.json"  # Google service account credentials
-SHEET_ID_CACHE_FILE = "sheet_id_cache.json"  # Cache sheet ID to reuse (avoid creating duplicates)
+
+# ✨ CREDENTIALS_FILE will be looked for NEXT TO the exe (not bundled inside)
+# This allows users to modify credentials.json without rebuilding the exe
+CREDENTIALS_FILE = os.path.join(get_application_path(), "credentials.json")
+SHEET_ID_CACHE_FILE = os.path.join(get_application_path(), "sheet_id_cache.json")
 
 data_lock = threading.Lock()
 
@@ -414,6 +439,125 @@ def normalize_symbol(symbol):
     """
     return re.sub(r'[^a-zA-Z0-9]', '', symbol)
 
+def is_forex_or_precious_metal(symbol):
+    """
+    ✨ Kiểm tra xem symbol có phải là FX/ngoại hối/vàng bạc không
+
+    Quy tắc nhận dạng:
+    - Symbol có 6+ ký tự
+    - Toàn bộ là chữ cái (không có số)
+    - Ví dụ: EURUSD, GBPUSD, USDJPY, XAUUSD, XAGUSD
+
+    Args:
+        symbol: Symbol đã được normalize
+
+    Returns:
+        bool: True nếu là FX/precious metal, False nếu không
+    """
+    # Normalize symbol (loại bỏ ký tự đặc biệt)
+    normalized = normalize_symbol(symbol)
+
+    # Kiểm tra: 6+ ký tự và toàn bộ là chữ cái
+    if len(normalized) >= 6 and normalized.isalpha():
+        return True
+
+    return False
+
+def match_first_6_chars_exact(symbol, alias):
+    """
+    ✨ Match CHÍNH XÁC 6 chữ cái đầu tiên (cho FX/precious metals)
+
+    Quy tắc:
+    - Lấy 6 chữ cái ĐẦU TIÊN từ cả symbol và alias (sau khi normalize)
+    - So sánh CHÍNH XÁC (case-insensitive)
+    - Phải khớp LIÊN TIẾP từ ký tự đầu tiên
+    - ✨ Điều kiện độ dài: Symbol có <=4 ký tự CHỈ match alias <=4 ký tự
+    - ✨ Symbol có >4 ký tự KHÔNG match alias <4 ký tự
+
+    Ví dụ:
+    - EURUSD.s vs EURUSD → EURUSD == EURUSD ✓ (match)
+    - EUAUSD.s vs EURUSD → EUAUSD != EURUSD ✗ (không match - ký tự thứ 3 khác)
+    - GCI.cl vs GC → ✗ (không match - GCIcl có 5 ký tự, GC có 2 ký tự)
+    - GCI vs GCIUSD → ✗ (không match - GCI có 3 ký tự, không match với alias 6 ký tự)
+
+    Args:
+        symbol: Symbol từ sàn (EURUSD.s)
+        alias: Alias từ file txt (EURUSD)
+
+    Returns:
+        bool: True nếu 6 ký tự đầu khớp chính xác VÀ độ dài hợp lệ
+    """
+    # Normalize cả 2
+    norm_symbol = normalize_symbol(symbol).lower()
+    norm_alias = normalize_symbol(alias).lower()
+
+    # ✨ ĐIỀU KIỆN ĐỘ DÀI:
+    # - Symbol <= 4 ký tự CHỈ match với alias <= 4 ký tự
+    # - Symbol > 4 ký tự KHÔNG match với alias < 4 ký tự
+    len_symbol = len(norm_symbol)
+    len_alias = len(norm_alias)
+
+    if len_symbol <= 4:
+        # Symbol ngắn (<=4) chỉ match với alias ngắn (<=4)
+        if len_alias > 4:
+            return False
+    else:
+        # Symbol dài (>4) không match với alias ngắn (<4)
+        if len_alias < 4:
+            return False
+
+    # Lấy 6 ký tự đầu
+    first_6_symbol = norm_symbol[:6]
+    first_6_alias = norm_alias[:6]
+
+    # So sánh chính xác
+    return first_6_symbol == first_6_alias and len(first_6_symbol) == 6
+
+def match_exact_all_letters(symbol, alias):
+    """
+    ✨ Match CHÍNH XÁC TẤT CẢ các chữ cái (cho các sản phẩm không phải FX)
+
+    Quy tắc:
+    - Sau khi normalize, tất cả các chữ cái phải khớp CHÍNH XÁC
+    - Case-insensitive
+    - ✨ Điều kiện độ dài: Symbol có <=4 ký tự CHỈ match alias <=4 ký tự
+    - ✨ Symbol có >4 ký tự KHÔNG match alias <4 ký tự
+
+    Ví dụ:
+    - BTCUSD.m vs BTCUSD → BTCUSD == BTCUSD ✓ (match)
+    - BTCUSDT vs BTCUSD → BTCUSDT != BTCUSD ✗ (không match - có thêm chữ T)
+    - GCI.cl vs GC → ✗ (không match - GCIcl có 5 ký tự, GC có 2 ký tự)
+    - GCI vs GCIUSD → ✗ (không match - GCI có 3 ký tự, không match với alias 6 ký tự)
+
+    Args:
+        symbol: Symbol từ sàn
+        alias: Alias từ file txt
+
+    Returns:
+        bool: True nếu tất cả chữ cái khớp chính xác VÀ độ dài hợp lệ
+    """
+    # Normalize cả 2 (loại bỏ ký tự đặc biệt, chỉ giữ chữ và số)
+    norm_symbol = normalize_symbol(symbol).lower()
+    norm_alias = normalize_symbol(alias).lower()
+
+    # ✨ ĐIỀU KIỆN ĐỘ DÀI:
+    # - Symbol <= 4 ký tự CHỈ match với alias <= 4 ký tự
+    # - Symbol > 4 ký tự KHÔNG match với alias < 4 ký tự
+    len_symbol = len(norm_symbol)
+    len_alias = len(norm_alias)
+
+    if len_symbol <= 4:
+        # Symbol ngắn (<=4) chỉ match với alias ngắn (<=4)
+        if len_alias > 4:
+            return False
+    else:
+        # Symbol dài (>4) không match với alias ngắn (<4)
+        if len_alias < 4:
+            return False
+
+    # So sánh chính xác
+    return norm_symbol == norm_alias
+
 def is_subsequence_match(str1, str2, min_length=5, min_similarity=0.5):
     """
     Logic subsequence matching cải tiến với các điều kiện chặt chẽ hơn:
@@ -535,12 +679,35 @@ def find_symbol_config(symbol):
     # Bước 2: Thử prefix match (O(n) where n = số aliases)
     # Tìm alias dài nhất là prefix của symbol để tránh false positive
     # Ví dụ: BTCUSDM nên match BTCUSD chứ không phải BTC
+    # ✨ QUAN TRỌNG: Áp dụng điều kiện độ dài để tránh match nhầm
     best_match = None
     best_match_len = 0
     best_matched_alias = None
 
     for alias_lower, symbol_chuan in gap_config_reverse_map.items():
         if symbol_lower.startswith(alias_lower):
+            # ✨ ĐIỀU KIỆN ĐỘ DÀI (giống như Bước 3):
+            # - Alias <= 2 ký tự CHỈ match với symbol CHÍNH XÁC 2 ký tự
+            # - Alias <= 4 ký tự CHỉ match với symbol <= 4 ký tự
+            # - Symbol > 4 ký tự KHÔNG match với alias < 4 ký tự
+            len_symbol = len(symbol_lower)
+            len_alias = len(alias_lower)
+
+            # ✨ Alias 2 ký tự CHỈ match symbol 2 ký tự (EXACT length match)
+            # Ví dụ: SI (2 chars) CHỈ match SI, KHÔNG match SIGUS
+            if len_alias <= 2:
+                if len_symbol != len_alias:
+                    continue  # Skip - không match
+            # ✨ Alias 3-4 ký tự chỉ match symbol <= 4 ký tự
+            elif len_alias <= 4:
+                if len_symbol > 4:
+                    continue  # Skip - không match
+            # ✨ Symbol dài (>4) không match với alias ngắn (<4)
+            else:
+                if len_symbol > 4 and len_alias < 4:
+                    continue  # Skip - không match
+
+            # Nếu pass được điều kiện độ dài, tìm alias dài nhất
             if len(alias_lower) > best_match_len:
                 best_match = symbol_chuan
                 best_match_len = len(alias_lower)
@@ -560,35 +727,53 @@ def find_symbol_config(symbol):
         symbol_config_cache[symbol] = result
         return result
 
-    # Bước 3: Thử subsequence match (O(n) - fallback cuối cùng)
-    # Tìm alias có ít nhất 5 ký tự khớp theo thứ tự từ trái qua phải
+    # ✨ Bước 3: LOGIC MỚI - Match theo loại sản phẩm
+    # - FX/ngoại hối/vàng bạc: Match CHÍNH XÁC 6 chữ cái đầu
+    # - Các sản phẩm khác: Match CHÍNH XÁC toàn bộ chữ cái
     best_match = None
     best_matched_alias = None
 
-    for alias_lower, symbol_chuan in gap_config_reverse_map.items():
-        if is_subsequence_match(symbol_lower, alias_lower):
-            best_match = symbol_chuan
-            # Tìm alias gốc (không lowercase) từ config
-            config = gap_config[symbol_chuan]
-            for alias in config['aliases']:
-                if alias.lower() == alias_lower:
-                    best_matched_alias = alias
-                    break
-            if not best_matched_alias:
-                best_matched_alias = symbol_chuan
-            # Tìm được match đầu tiên thì dừng ngay (không cần tìm best match)
+    # ✨ Kiểm tra xem symbol có phải FX/precious metal không
+    is_fx = is_forex_or_precious_metal(symbol)
+
+    # ✨ Duyệt qua tất cả aliases trong file txt để tìm match
+    for symbol_chuan, config in gap_config.items():
+        # Kiểm tra với symbol chính
+        all_aliases_to_check = [symbol_chuan] + config['aliases']
+
+        for alias in all_aliases_to_check:
+            matched = False
+
+            if is_fx:
+                # ✨ FX/precious metals: Match CHÍNH XÁC 6 chữ cái đầu
+                # Ví dụ: EURUSD.s → EURUSD (OK), EUAUSD.s → EURUSD (KHÔNG OK)
+                if match_first_6_chars_exact(symbol, alias):
+                    matched = True
+                    logger.info(f"✅ FX Match (6 chars): '{symbol}' → '{alias}' (từ file txt)")
+            else:
+                # ✨ Các sản phẩm khác: Match CHÍNH XÁC toàn bộ chữ cái
+                # Ví dụ: BTCUSD.m → BTCUSD (OK), BTCUSDT → BTCUSD (KHÔNG OK)
+                if match_exact_all_letters(symbol, alias):
+                    matched = True
+                    logger.info(f"✅ Exact Match (all letters): '{symbol}' → '{alias}' (từ file txt)")
+
+            if matched:
+                best_match = symbol_chuan
+                best_matched_alias = alias
+                break
+
+        if best_match:
             break
 
     if best_match:
         config = gap_config[best_match]
-        # ✅ Tắt log subsequence match để tránh spam log (chỉ dò 1 lần khi khởi động)
-        # logger.info(f"✅ Subsequence match: '{symbol}' → '{best_matched_alias}'")
         # ✅ Lưu vào cache trước khi return
         result = (best_match, config, best_matched_alias)
         symbol_config_cache[symbol] = result
         return result
 
     # ✅ Cache cả trường hợp không tìm thấy để tránh tìm lại
+    logger.warning(f"❌ Không tìm thấy config cho symbol: '{symbol}' (FX={is_fx})")
     result = (None, None, None)
     symbol_config_cache[symbol] = result
     return result
@@ -650,22 +835,40 @@ def calculate_gap_point(symbol, broker, data, spread_percent=None):
             }
 
         # Calculate threshold in points
-        # ThresholdPoint = DEFAULT_GAP / PointDigits
-        default_gap_percent = config['default_gap_percent']
-        threshold_point = default_gap_percent / point_value
+        # ✨ PRIORITY: Check custom_thresholds first, then use config from file
+        key = f"{broker}_{symbol}"
+
+        # Check if user has set custom gap_point threshold in Bảng 1
+        if key in custom_thresholds and 'gap_point' in custom_thresholds[key]:
+            # Use custom threshold directly (already in points)
+            threshold_point = float(custom_thresholds[key]['gap_point'])
+            default_gap_percent = threshold_point * point_value  # Convert back for display
+        else:
+            # Use threshold from config file (txt)
+            # ThresholdPoint = DEFAULT_GAP / PointDigits
+            default_gap_percent = config['default_gap_percent']
+            threshold_point = default_gap_percent / point_value
 
         # Calculate point gap
         point_gap = abs(current_open - prev_close) / point_value
 
+        # ✨ Calculate spread in points
+        spread_point = abs(current_ask - current_bid) / point_value
+
         # Determine direction
         if current_open > prev_close:
             direction = 'up'
-            # Gap Up condition: pointGap >= ThresholdPoint
-            detected = point_gap >= threshold_point
+            # ✨ Gap Up condition: pointGap >= ThresholdPoint AND pointGap > spread
+            gap_up_threshold_met = point_gap >= threshold_point
+            gap_up_spread_met = point_gap > spread_point
+            detected = gap_up_threshold_met and gap_up_spread_met
         elif current_open < prev_close:
             direction = 'down'
-            # Gap Down condition: pointGap >= ThresholdPoint AND Ask < Close_prev
-            detected = (point_gap >= threshold_point) and (current_ask < prev_close)
+            # ✨ Gap Down condition: pointGap >= ThresholdPoint AND Ask < Close_prev AND pointGap > spread
+            gap_down_threshold_met = point_gap >= threshold_point
+            gap_down_ask_valid = current_ask < prev_close
+            gap_down_spread_met = point_gap > spread_point
+            detected = gap_down_threshold_met and gap_down_ask_valid and gap_down_spread_met
         else:
             direction = 'none'
             detected = False
@@ -676,17 +879,25 @@ def calculate_gap_point(symbol, broker, data, spread_percent=None):
                 message = (
                     f"GAP UP (Point): {point_gap:.1f} points "
                     f"(Open: {current_open:.5f}, Close_prev: {prev_close:.5f}, "
-                    f"ngưỡng: {threshold_point:.1f} points / {default_gap_percent}%)"
+                    f"ngưỡng: {threshold_point:.1f} points / spread: {spread_point:.1f} points)"
                 )
             else:
                 message = (
                     f"GAP DOWN (Point): {point_gap:.1f} points "
                     f"(Open: {current_open:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}, "
-                    f"ngưỡng: {threshold_point:.1f} points / {default_gap_percent}%)"
+                    f"ngưỡng: {threshold_point:.1f} points / spread: {spread_point:.1f} points)"
                 )
         else:
-            if direction == 'down' and point_gap >= threshold_point:
-                message = f"Gap Down: {point_gap:.1f} points (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+            if direction == 'up' and gap_up_threshold_met and not gap_up_spread_met:
+                message = f"Gap Up: {point_gap:.1f} points <= Spread {spread_point:.1f} points - Không hợp lệ"
+            elif direction == 'down' and gap_down_threshold_met:
+                # Gap down vượt ngưỡng nhưng không hợp lệ
+                if not gap_down_ask_valid:
+                    message = f"Gap Down: {point_gap:.1f} points (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+                elif not gap_down_spread_met:
+                    message = f"Gap Down: {point_gap:.1f} points <= Spread {spread_point:.1f} points - Không hợp lệ"
+                else:
+                    message = f"Gap Down: {point_gap:.1f} points - Không hợp lệ"
             else:
                 message = f"Gap: {point_gap:.1f} points"
 
@@ -764,11 +975,21 @@ def calculate_spike_point(symbol, broker, data, spread_percent=None):
             }
 
         # Calculate threshold in points (same as gap threshold)
-        default_gap_percent = config['default_gap_percent']
-        threshold_point = default_gap_percent / point_value
+        # ✨ PRIORITY: Check custom_thresholds first, then use config from file
+        key = f"{broker}_{symbol}"
+
+        # Check if user has set custom spike_point threshold in Bảng 1
+        if key in custom_thresholds and 'spike_point' in custom_thresholds[key]:
+            # Use custom threshold directly (already in points)
+            threshold_point = float(custom_thresholds[key]['spike_point'])
+            default_gap_percent = threshold_point * point_value  # Convert back for display
+        else:
+            # Use threshold from config file (txt)
+            # ThresholdPoint = DEFAULT_GAP / PointDigits
+            default_gap_percent = config['default_gap_percent']
+            threshold_point = default_gap_percent / point_value
 
         # Track previous bid for this symbol
-        key = f"{broker}_{symbol}"
 
         if key not in bid_tracking:
             # First time - no previous bid
@@ -787,18 +1008,27 @@ def calculate_spike_point(symbol, broker, data, spread_percent=None):
         # Calculate spike in points
         spike_point = abs(current_bid - prev_bid) / point_value
 
-        # Detect spike
-        detected = spike_point >= threshold_point
+        # ✨ Calculate spread in points
+        current_ask = float(data.get('ask', 0))
+        spread_point = abs(current_ask - current_bid) / point_value
+
+        # ✨ Detect spike: Must exceed threshold AND spread
+        spike_threshold_met = spike_point >= threshold_point
+        spike_spread_met = spike_point > spread_point
+        detected = spike_threshold_met and spike_spread_met
 
         # Build message
         if detected:
             message = (
                 f"SPIKE (Point): {spike_point:.1f} points "
                 f"(Bid: {current_bid:.5f}, Bid_prev: {prev_bid:.5f}, "
-                f"ngưỡng: {threshold_point:.1f} points / {default_gap_percent}%)"
+                f"ngưỡng: {threshold_point:.1f} points / spread: {spread_point:.1f} points)"
             )
         else:
-            message = f"Spike: {spike_point:.1f} points"
+            if spike_threshold_met and not spike_spread_met:
+                message = f"Spike: {spike_point:.1f} points <= Spread {spread_point:.1f} points - Không hợp lệ"
+            else:
+                message = f"Spike: {spike_point:.1f} points"
 
         result = {
             'detected': detected,
@@ -1025,48 +1255,46 @@ def timestamp_to_date_day(timestamp):
     return timestamp // 86400
 
 # ===================== GOOGLE SHEETS INTEGRATION =====================
-def push_to_google_sheets(accepted_items):
+def push_to_google_sheets(accepted_items, assignee=None):
     """
     Push accepted screenshot data to Google Sheets (using config from auto_send_settings)
-    
+
     Args:
-        accepted_items: List of screenshot data dictionaries
-    
+        accepted_items: List of screenshot data dictionaries (có thể là list rỗng)
+        assignee: Tên người gửi (dùng khi không có accepted_items)
+
     Returns:
         (success: bool, message: str)
     """
     try:
         if not os.path.exists(CREDENTIALS_FILE):
             return False, f"❌ Không tìm thấy file {CREDENTIALS_FILE}"
-        
-        if not accepted_items:
-            return False, "⚠️ Chưa có hình nào được Accept"
-        
+
         # Check if auto_send settings configured
         sheet_url = auto_send_settings.get('sheet_url', '').strip()
         if not sheet_url:
             return False, "⚠️ Chưa cấu hình Google Sheet!\n\nVui lòng vào Settings → Auto-Send Sheets để cấu hình Sheet URL."
-        
+
         # Authenticate with Google Sheets
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
-        
+
         logger.info("Authenticating with Google Sheets...")
         creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
         client = gspread.authorize(creds)
-        
+
         # Extract sheet ID from URL
         import re
         match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheet_url)
         if not match:
             return False, f"❌ URL không hợp lệ!\n\nURL phải có dạng:\nhttps://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/..."
-        
+
         sheet_id = match.group(1)
         logger.info(f"Opening sheet by ID: {sheet_id}")
         spreadsheet = client.open_by_key(sheet_id)
-        
+
         # Get the specified sheet (tab)
         sheet_name = auto_send_settings.get('sheet_name', '').strip()
         if sheet_name:
@@ -1078,46 +1306,98 @@ def push_to_google_sheets(accepted_items):
         else:
             sheet = spreadsheet.sheet1
             logger.info(f"Opened default sheet tab")
-        
-        # Build row data based on column mapping
-        columns = auto_send_settings.get('columns', {})
-        rows = []
-        
-        for item in accepted_items:
-            row = []
-            
-            if columns.get('assignee', True):
-                row.append(item.get('assigned_name', ''))
 
-            if columns.get('time', True):
-                # Use server time from item if available
-                server_time = item.get('server_time', '')
-                if server_time:
-                    row.append(server_time)
-                else:
-                    row.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            
-            if columns.get('broker', True):
-                row.append(item.get('broker', ''))
-            
-            if columns.get('symbol', True):
-                row.append(item.get('symbol', ''))
-            
-            if columns.get('type', True):
-                row.append(item.get('detection_type', '').upper())
-            
-            if columns.get('percentage', True):
-                row.append(item.get('percentage', ''))
-            
-            rows.append(row)
-        
-        # Append all rows at once (more efficient)
-        logger.info(f"Appending {len(rows)} rows to sheet...")
-        sheet.append_rows(rows)
-        
-        logger.info(f"Successfully pushed {len(rows)} items to Google Sheets")
-        return True, f"✅ Đã gửi {len(rows)} ảnh lên Google Sheets!\n\n📊 Sheet: {spreadsheet.title}\n🔗 Link: {sheet_url}"
-        
+        # ✨ Lấy thời gian gửi (local time khi bấm hoàn thành)
+        send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # ✨ LOGIC CHÍNH:
+        # - Nếu CÓ ảnh: Gửi tới CẢ 2 sheets (sheet chính + sheet điểm danh)
+        # - Nếu KHÔNG có ảnh: CHỈ gửi tới sheet điểm danh
+
+        if accepted_items:
+            # ✨ Trường hợp CÓ kèo - gửi dữ liệu tới SHEET CHÍNH
+            columns = auto_send_settings.get('columns', {})
+            rows = []
+
+            for item in accepted_items:
+                row = []
+
+                if columns.get('assignee', True):
+                    row.append(item.get('assigned_name', ''))
+
+                if columns.get('send_time', True):
+                    row.append(send_time)
+
+                if columns.get('note', True):
+                    row.append('KÉO SÀN')
+
+                if columns.get('time', True):
+                    # Use server time from item if available
+                    server_time = item.get('server_time', '')
+                    if server_time:
+                        row.append(server_time)
+                    else:
+                        row.append('')
+
+                if columns.get('broker', True):
+                    row.append(item.get('broker', ''))
+
+                if columns.get('symbol', True):
+                    row.append(item.get('symbol', ''))
+
+                if columns.get('type', True):
+                    row.append(item.get('detection_type', '').upper())
+
+                if columns.get('percentage', True):
+                    row.append(item.get('percentage', ''))
+
+                rows.append(row)
+
+            # Append all rows at once to main sheet (more efficient)
+            logger.info(f"Appending {len(rows)} rows to main sheet...")
+            sheet.append_rows(rows)
+        else:
+            # ✨ Trường hợp KHÔNG có kèo - KHÔNG gửi tới sheet chính
+            logger.info(f"No screenshots - skipping main sheet, will only send to attendance sheet")
+
+
+        # ✨ GỬI THÊM 1 DÒNG DUY NHẤT TỚI SHEET "ĐIỂM DANH"
+        try:
+            attendance_sheet_name = auto_send_settings.get('attendance_sheet_name', 'Điểm danh').strip()
+            if attendance_sheet_name:
+                try:
+                    attendance_sheet = spreadsheet.worksheet(attendance_sheet_name)
+
+                    # Lấy assignee - ưu tiên từ accepted_items, sau đó từ tham số, cuối cùng từ settings
+                    attendance_assignee = assignee
+                    if not attendance_assignee and accepted_items:
+                        # Lấy assignee từ item đầu tiên
+                        attendance_assignee = accepted_items[0].get('assigned_name', '')
+                    if not attendance_assignee:
+                        attendance_assignee = screenshot_settings.get('assigned_name', '')
+
+                    # Tạo dòng điểm danh: [Thời gian gửi, Tên người gửi, Note]
+                    attendance_row = [send_time, attendance_assignee, 'KÉO SÀN']
+
+                    # Gửi 1 dòng duy nhất tới sheet Điểm danh
+                    attendance_sheet.append_row(attendance_row)
+                    logger.info(f"Successfully pushed attendance to '{attendance_sheet_name}' sheet")
+                except Exception as attendance_err:
+                    # Không tìm thấy sheet Điểm danh - log warning nhưng vẫn thành công với sheet chính
+                    logger.warning(f"Không thể gửi tới sheet '{attendance_sheet_name}': {attendance_err}")
+        except Exception as e:
+            # Lỗi điểm danh không ảnh hưởng đến kết quả chính
+            logger.error(f"Error sending to attendance sheet: {e}")
+
+        if not accepted_items:
+            # Chỉ gửi điểm danh, không gửi dữ liệu kèo
+            logger.info(f"Successfully sent attendance record only (no screenshots)")
+            return True, f"✅ Đã gửi điểm danh lên sheet 'Điểm danh'!\n\n📊 Sheet: {spreadsheet.title}\n(Không gửi dữ liệu kèo vì không có ảnh)\n🔗 Link: {sheet_url}"
+        else:
+            # Đã gửi cả dữ liệu kèo và điểm danh
+            logger.info(f"Successfully pushed {len(accepted_items)} items to main sheet + attendance")
+            return True, f"✅ Đã gửi {len(accepted_items)} ảnh lên Google Sheets!\n\n📊 Sheet chính: Dữ liệu kèo ({len(accepted_items)} dòng)\n📝 Sheet điểm danh: 1 dòng\n🔗 Link: {sheet_url}"
+
     except Exception as e:
         error_msg = f"Lỗi khi gửi lên Google Sheets: {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -1498,59 +1778,6 @@ def save_symbol_filter_settings():
     except Exception as e:
         logger.error(f"Error saving symbol filter settings: {e}")
 
-# ===================== BROKER SELECTION SETTINGS =====================
-def load_broker_selection_settings():
-    """Load broker selection settings from JSON file"""
-    global broker_selection_settings
-    try:
-        if os.path.exists(BROKER_SELECTION_FILE):
-            with open(BROKER_SELECTION_FILE, 'r', encoding='utf-8') as f:
-                loaded = json.load(f) or {}
-
-            enabled_brokers = loaded.get('enabled_brokers', [])
-            if not isinstance(enabled_brokers, list):
-                enabled_brokers = []
-
-            broker_selection_settings['enabled_brokers'] = enabled_brokers
-
-            logger.info(
-                "Loaded broker selection settings: %d brokers enabled",
-                len(enabled_brokers)
-            )
-        else:
-            broker_selection_settings['enabled_brokers'] = []
-            logger.info("No broker_selection_settings.json found, using defaults")
-    except Exception as e:
-        logger.error(f"Error loading broker selection settings: {e}")
-        broker_selection_settings['enabled_brokers'] = []
-
-def save_broker_selection_settings():
-    """Save broker selection settings to JSON file"""
-    try:
-        payload = {
-            'enabled_brokers': broker_selection_settings.get('enabled_brokers', [])
-        }
-
-        with open(BROKER_SELECTION_FILE, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-
-        logger.info(
-            "Saved broker selection settings: %d brokers enabled",
-            len(payload['enabled_brokers'])
-        )
-    except Exception as e:
-        logger.error(f"Error saving broker selection settings: {e}")
-
-def is_broker_enabled(broker):
-    """Check if a broker is enabled for data reception"""
-    enabled_brokers = broker_selection_settings.get('enabled_brokers', [])
-
-    # Nếu danh sách rỗng, mặc định cho phép tất cả (backward compatibility)
-    if not enabled_brokers:
-        return True
-
-    return broker in enabled_brokers
-
 # ===================== SYMBOL FILTER HELPERS =====================
 def is_symbol_selected_for_detection(broker, symbol):
     """
@@ -1895,7 +2122,9 @@ def load_auto_send_settings():
             # Ensure new column defaults exist
             default_columns = {
                 'assignee': True,
-                'time': True,
+                'send_time': True,  # Thời gian gửi (local time)
+                'note': True,  # Note: Luôn hiển thị "KÉO SÀN"
+                'time': True,  # Server time từ MT4/MT5
                 'broker': True,
                 'symbol': True,
                 'type': True,
@@ -1906,6 +2135,9 @@ def load_auto_send_settings():
             for key, default_value in default_columns.items():
                 columns.setdefault(key, default_value)
             auto_send_settings['columns'] = columns
+
+            # ✨ Ensure attendance_sheet_name has default value
+            auto_send_settings.setdefault('attendance_sheet_name', 'Điểm danh')
 
             logger.info(f"Loaded auto-send settings: enabled={auto_send_settings['enabled']}")
         else:
@@ -2091,6 +2323,52 @@ def ensure_pictures_folder():
         os.makedirs(folder)
         logger.info(f"Created pictures folder: {folder}")
 
+def auto_delete_old_screenshots():
+    """
+    Automatically delete screenshots older than configured hours
+    This runs in background thread periodically
+    """
+    try:
+        if not screenshot_settings.get('auto_delete_enabled', False):
+            return
+
+        folder = screenshot_settings.get('folder', 'pictures')
+        if not os.path.exists(folder):
+            return
+
+        delete_hours = screenshot_settings.get('auto_delete_hours', 48)
+        delete_seconds = delete_hours * 3600
+        current_time = time.time()
+        deleted_count = 0
+
+        # Scan all PNG files in folder
+        for filename in os.listdir(folder):
+            if not filename.endswith('.png'):
+                continue
+
+            filepath = os.path.join(folder, filename)
+
+            try:
+                # Get file creation/modification time
+                file_mtime = os.path.getmtime(filepath)
+                file_age_seconds = current_time - file_mtime
+
+                # Delete if older than threshold
+                if file_age_seconds >= delete_seconds:
+                    # 🔥 Permanent delete (không qua Recycle bin)
+                    os.remove(filepath)
+                    deleted_count += 1
+                    logger.info(f"Auto-deleted old screenshot: {filename} (age: {file_age_seconds/3600:.1f}h)")
+
+            except Exception as e:
+                logger.error(f"Error deleting screenshot {filename}: {e}")
+
+        if deleted_count > 0:
+            logger.info(f"Auto-delete completed: {deleted_count} screenshot(s) deleted (older than {delete_hours}h)")
+
+    except Exception as e:
+        logger.error(f"Error in auto_delete_old_screenshots: {e}")
+
 def capture_chart_screenshot(broker, symbol, detection_type, gap_info=None, spike_info=None, server_timestamp=None):
     """
     Capture screenshot of chart when gap/spike detected
@@ -2184,12 +2462,22 @@ def capture_chart_screenshot(broker, symbol, detection_type, gap_info=None, spik
         # Title with detection info
         title_parts = [f'{broker} - {symbol}']
         if gap_info and gap_info.get('detected'):
-            gap_pct = gap_info.get('percentage', 0)
+            # ✨ Fix: Hỗ trợ cả percent-based ('percentage') và point-based ('point_gap')
+            gap_pct = gap_info.get('percentage')
+            if gap_pct is None:
+                # Point-based: dùng default_gap_percent từ config
+                gap_pct = gap_info.get('default_gap_percent', 0)
             gap_dir = gap_info.get('direction', '').upper()
             title_parts.append(f'GAP {gap_dir}: {gap_pct:.3f}%')
         if spike_info and spike_info.get('detected'):
-            spike_pct = spike_info.get('strength', 0)
-            spike_type = spike_info.get('spike_type', '')
+            # ✨ Fix: Hỗ trợ cả percent-based ('strength') và point-based ('spike_point')
+            spike_pct = spike_info.get('strength')
+            if spike_pct is None:
+                # Point-based: dùng default_gap_percent từ config (spike dùng chung threshold với gap)
+                spike_pct = spike_info.get('default_gap_percent', 0)
+            spike_type = spike_info.get('spike_type', '').upper()
+            if not spike_type:
+                spike_type = 'DETECTED'
             title_parts.append(f'SPIKE {spike_type}: {spike_pct:.3f}%')
         
         ax.set_title(' | '.join(title_parts), color='white', fontsize=14, fontweight='bold')
@@ -2237,18 +2525,34 @@ def capture_chart_screenshot(broker, symbol, detection_type, gap_info=None, spik
 
         # Save metadata for later export (Accept → Google Sheets)
         try:
+            # ✨ Fix: Lưu percentage cho cả percent-based và point-based
+            gap_percentage_value = None
+            if gap_info:
+                gap_percentage_value = gap_info.get('percentage')
+                if gap_percentage_value is None:
+                    # Point-based: dùng default_gap_percent từ config
+                    gap_percentage_value = gap_info.get('default_gap_percent')
+
             gap_meta = {
                 'detected': bool(gap_info.get('detected')) if gap_info else False,
                 'direction': gap_info.get('direction') if gap_info else None,
-                'percentage': float(gap_info.get('percentage')) if gap_info and gap_info.get('percentage') is not None else None,
+                'percentage': float(gap_percentage_value) if gap_percentage_value is not None else None,
                 'message': gap_info.get('message') if gap_info else '',
                 'threshold': gap_info.get('threshold') if gap_info else None
             }
 
+            # ✨ Fix: Lưu strength cho cả percent-based và point-based
+            spike_strength_value = None
+            if spike_info:
+                spike_strength_value = spike_info.get('strength')
+                if spike_strength_value is None:
+                    # Point-based: dùng default_gap_percent từ config (spike dùng chung threshold với gap)
+                    spike_strength_value = spike_info.get('default_gap_percent')
+
             spike_meta = {
                 'detected': bool(spike_info.get('detected')) if spike_info else False,
                 'spike_type': spike_info.get('spike_type') if spike_info else None,
-                'strength': float(spike_info.get('strength')) if spike_info and spike_info.get('strength') is not None else None,
+                'strength': float(spike_strength_value) if spike_strength_value is not None else None,
                 'message': spike_info.get('message') if spike_info else '',
                 'threshold': spike_info.get('threshold') if spike_info else None
             }
@@ -2611,8 +2915,11 @@ def calculate_gap(symbol, broker, data, spread_percent=None):
         if direction == 'up':
             detected = gap_up_threshold_met and gap_up_spread_met
         elif direction == 'down':
-            # Gap Down: Kiểm tra % VÀ Ask < Close_prev
-            detected = (gap_percentage_abs >= gap_threshold) and (current_ask < prev_close)
+            # ✨ Gap Down: Kiểm tra % VÀ Ask < Close_prev VÀ gap > spread
+            gap_down_threshold_met = gap_percentage_abs >= gap_threshold
+            gap_down_ask_valid = current_ask < prev_close
+            gap_down_spread_met = gap_percentage_abs > spread_percent
+            detected = gap_down_threshold_met and gap_down_ask_valid and gap_down_spread_met
         else:
             # No gap
             detected = False
@@ -2622,7 +2929,7 @@ def calculate_gap(symbol, broker, data, spread_percent=None):
             if direction == 'down':
                 message = (
                     f"GAP DOWN: {gap_percentage_abs:.3f}% (Open: {current_open:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}, "
-                    f"ngưỡng: {gap_threshold}%)"
+                    f"ngưỡng: {gap_threshold}% / spread: {spread_percent:.3f}%)"
                 )
             else:
                 message = (
@@ -2634,8 +2941,14 @@ def calculate_gap(symbol, broker, data, spread_percent=None):
                 message = (
                     f"Gap Up: {gap_percentage_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
                 )
-            elif direction == 'down' and gap_percentage_abs >= gap_threshold and current_ask >= prev_close:
-                message = f"Gap Down: {gap_percentage_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+            elif direction == 'down' and gap_percentage_abs >= gap_threshold:
+                # Gap down vượt ngưỡng nhưng không hợp lệ
+                if current_ask >= prev_close:
+                    message = f"Gap Down: {gap_percentage_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+                elif gap_percentage_abs <= spread_percent:
+                    message = f"Gap Down: {gap_percentage_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
+                else:
+                    message = f"Gap Down: {gap_percentage_abs:.3f}% - Không hợp lệ"
             else:
                 message = f"Gap: {gap_percentage_abs:.3f}%"
         
@@ -2727,10 +3040,13 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
         spike_up_threshold_met = spike_up_abs >= spike_threshold
         spike_up_spread_met = spike_up_abs > spread_percent
         spike_up_detected = spike_up_threshold_met and spike_up_spread_met
-        
-        # Kiểm tra spike down với điều kiện BỔ SUNG: Ask < Close_prev
-        spike_down_detected = (spike_down_abs >= spike_threshold) and (current_ask < prev_close)
-        
+
+        # ✨ Kiểm tra spike down với điều kiện: Ask < Close_prev VÀ spike > spread
+        spike_down_threshold_met = spike_down_abs >= spike_threshold
+        spike_down_ask_valid = current_ask < prev_close
+        spike_down_spread_met = spike_down_abs > spread_percent
+        spike_down_detected = spike_down_threshold_met and spike_down_ask_valid and spike_down_spread_met
+
         detected = spike_up_detected or spike_down_detected
         
         # Xác định spike mạnh nhất và hướng
@@ -2756,7 +3072,7 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
             spike_type = "DOWN"
             spike_value = spike_down
             spike_abs = spike_down_abs
-            price_detail = f"Low: {current_low:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}"
+            price_detail = f"Low: {current_low:.5f}, Ask: {current_ask:.5f} < Close_prev: {prev_close:.5f}, Spread: {spread_percent:.3f}%"
         else:
             # Không detected → Chọn spike lớn hơn để hiển thị
             if spike_up_abs > spike_down_abs:
@@ -2774,6 +3090,8 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
                 # Hiển thị lý do không detected
                 if current_ask >= prev_close:
                     price_detail = f"Low: {current_low:.5f}, Ask: {current_ask:.5f} >= Close_prev: {prev_close:.5f} (Không hợp lệ)"
+                elif spike_down_threshold_met and not spike_down_spread_met:
+                    price_detail = f"Low: {current_low:.5f}, Spread {spread_percent:.3f}% >= Spike"
                 else:
                     price_detail = f"Low: {current_low:.5f}"
         
@@ -2782,10 +3100,14 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
         else:
             if spike_up_threshold_met and not spike_up_spread_met:
                 message = f"Spike Up: {spike_up_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
-            elif spike_down_abs >= spike_threshold and current_ask >= prev_close:
-                message = (
-                    f"Spike Down: {spike_down_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
-                )
+            elif spike_down_threshold_met:
+                # Spike down vượt ngưỡng nhưng không hợp lệ
+                if current_ask >= prev_close:
+                    message = f"Spike Down: {spike_down_abs:.3f}% (Ask {current_ask:.5f} >= Close_prev {prev_close:.5f} - Không hợp lệ)"
+                elif not spike_down_spread_met:
+                    message = f"Spike Down: {spike_down_abs:.3f}% <= Spread {spread_percent:.3f}% - Không hợp lệ"
+                else:
+                    message = f"Spike Down: {spike_down_abs:.3f}% - Không hợp lệ"
             else:
                 message = f"Spike: Up {spike_up_abs:.3f}% / Down {spike_down_abs:.3f}%"
 
@@ -2816,6 +3138,41 @@ def calculate_spike(symbol, broker, data, spread_percent=None):
         }
 
 # ===================== FLASK ENDPOINTS =====================
+
+# ═══════════════════════════════════════════════════════════════════════
+# ✨ NEW FEATURE: Filter symbols based on trade_mode
+# ═══════════════════════════════════════════════════════════════════════
+
+def should_filter_symbol(trade_mode):
+    """
+    Kiểm tra xem symbol có nên bị lọc không dựa trên trade_mode
+
+    Lọc bỏ (CHỈ 2 LOẠI):
+    - DISABLED (Trade: No) = hoàn toàn không cho trade
+    - CLOSEONLY (Trade: Close) = chỉ đóng lệnh, không mở lệnh mới
+
+    Giữ lại:
+    - FULL = full trading
+    - LONGONLY = chỉ long
+    - SHORTONLY = chỉ short
+    - UNKNOWN = không xác định (GIỮ LẠI vì nhiều sản phẩm UNKNOWN vẫn trade được)
+
+    Args:
+        trade_mode (str): Trade mode từ EA (DISABLED, CLOSEONLY, FULL, LONGONLY, SHORTONLY, UNKNOWN)
+
+    Returns:
+        bool: True if should filter (loại bỏ), False if should keep
+    """
+    if not trade_mode:
+        return False  # No trade_mode = keep (giữ lại thay vì filter)
+
+    trade_mode = trade_mode.upper()
+
+    # CHỈ loại bỏ 2 trade_mode sau (bỏ UNKNOWN):
+    filtered_modes = ['DISABLED', 'CLOSEONLY']
+
+    return trade_mode in filtered_modes
+
 @app.route('/api/receive_data', methods=['POST'])
 def receive_data():
     """Nhận dữ liệu từ EA MT4/MT5"""
@@ -2824,13 +3181,6 @@ def receive_data():
         broker = data.get('broker', 'Unknown')
         timestamp = data.get('timestamp', int(time.time()))
         symbols_data = data.get('data', [])
-
-        # Kiểm tra xem broker có được chọn để nhận dữ liệu hay không
-        if not is_broker_enabled(broker):
-            return jsonify({
-                'status': 'ignored',
-                'message': f'Broker "{broker}" is not enabled for data reception'
-            }), 200
         
         with data_lock:
             # Optimize: Use setdefault() instead of if-check (faster dict access)
@@ -2841,7 +3191,37 @@ def receive_data():
                 if not symbol:
                     continue
                 
-                # Lưu dữ liệu market
+                # ✨ NEW: Lấy trade_mode từ EA
+                trade_mode = symbol_data.get('trade_mode', '')
+                
+                # ✨ NEW: Kiểm tra xem symbol có bị filter không
+                if should_filter_symbol(trade_mode):
+                    # Lưu vào filtered_symbols để hiển thị trong Settings
+                    if broker not in filtered_symbols:
+                        filtered_symbols[broker] = {}
+                    
+                    filtered_symbols[broker][symbol] = {
+                        'trade_mode': trade_mode,
+                        'timestamp': timestamp
+                    }
+                    
+                    # Xóa symbol khỏi market_data nếu có
+                    broker_data.pop(symbol, None)
+                    
+                    # Xóa detection results
+                    clear_symbol_detection_results(broker, symbol)
+                    key = f"{broker}_{symbol}"
+                    bid_tracking.pop(key, None)
+                    candle_data.pop(key, None)
+                    
+                    # Skip symbol này
+                    continue
+                
+                # Nếu symbol KHÔNG bị filter, xóa nó khỏi filtered_symbols (nếu có)
+                if broker in filtered_symbols and symbol in filtered_symbols[broker]:
+                    del filtered_symbols[broker][symbol]
+                
+                # Lưu dữ liệu market (giống như cũ, THÊM trade_mode)
                 current_bid = symbol_data.get('bid', 0)
                 broker_data[symbol] = {
                     'timestamp': timestamp,
@@ -2853,7 +3233,8 @@ def receive_data():
                     'prev_ohlc': symbol_data.get('prev_ohlc', {}),
                     'current_ohlc': symbol_data.get('current_ohlc', {}),
                     'trade_sessions': symbol_data.get('trade_sessions', {}),
-                    'group': symbol_data.get('group', '')
+                    'group': symbol_data.get('group', ''),
+                    'trade_mode': trade_mode  # ✨ THÊM FIELD MỚI
                 }
                 
                 key = f"{broker}_{symbol}"
@@ -2914,21 +3295,24 @@ def receive_data():
                         candle_data[key] = []
                 
                 # Then accumulate current candle data (as before)
-                if current_ohlc.get('open') and current_ohlc.get('close'):
+                # 🔒 IMPORTANT: Only add candle data if market is OPEN
+                is_market_open = symbol_data.get('isOpen', True)
+
+                if current_ohlc.get('open') and current_ohlc.get('close') and is_market_open:
                     # Round timestamp về đầu phút (M1 = 60s)
                     # VD: 14:30:45 → 14:30:00
                     candle_time = (timestamp // 60) * 60
-                    
+
                     o = float(current_ohlc.get('open', 0))
                     h = float(current_ohlc.get('high', 0))
                     l = float(current_ohlc.get('low', 0))
                     c = float(current_ohlc.get('close', 0))
-                    
+
                     # ✅ FIX: LUÔN đảm bảo list được khởi tạo (không chỉ lần đầu)
                     # Nếu key chưa tồn tại HOẶC list bị xóa, khởi tạo lại
                     if key not in candle_data or not isinstance(candle_data[key], list):
                         candle_data[key] = []
-                    
+
                     # Kiểm tra nến cuối cùng
                     if candle_data[key]:
                         last_candle = candle_data[key][-1]
@@ -2962,10 +3346,14 @@ def receive_data():
                     else:
                         # Nến đầu tiên (list trống)
                         candle_data[key].append((candle_time, o, h, l, c))
-                    
+
                     # Giữ tối đa 200 nến (để chart load nhanh)
                     if len(candle_data[key]) > 200:
                         candle_data[key] = candle_data[key][-200:]
+                elif not is_market_open:
+                    # 🔒 Market đóng cửa - Không thêm nến mới, chỉ đảm bảo list tồn tại
+                    if key not in candle_data or not isinstance(candle_data[key], list):
+                        candle_data[key] = []
 
                 # Tính toán Gap và Spike
                 # Kiểm tra nếu setting "only_check_open_market" được bật
@@ -2987,19 +3375,6 @@ def receive_data():
                     should_calculate = False
                     skip_minutes = market_open_settings.get('skip_minutes_after_open', 0)
                     skip_reason = f"Bỏ {skip_minutes} phút đầu sau khi mở cửa"
-
-                # ✨ Kiểm tra startup delay - không xét gap/spike trong 5 phút đầu khi khởi động
-                if should_calculate:
-                    startup_delay_minutes = audio_settings.get('startup_delay_minutes', 5)
-                    startup_delay_seconds = startup_delay_minutes * 60
-                    current_time_check = time.time()
-                    time_since_startup = current_time_check - app_startup_time
-
-                    if time_since_startup < startup_delay_seconds:
-                        should_calculate = False
-                        remaining_seconds = int(startup_delay_seconds - time_since_startup)
-                        remaining_minutes = remaining_seconds // 60
-                        skip_reason = f"Startup delay - còn {remaining_minutes} phút {remaining_seconds % 60} giây"
 
                 # ⚡ OPTIMIZATION: Tính spread 1 lần và truyền vào cả 2 hàm
                 spread_percent = calculate_spread_percent(
@@ -3166,335 +3541,11 @@ def health():
         "total_symbols": sum(len(symbols) for symbols in market_data.values())
     })
 
-# ===================== BROKER SELECTION DIALOGS =====================
-class BrokerSelectionDialog:
-    """Dialog chọn sàn khi khởi động ứng dụng"""
-
-    def __init__(self, parent):
-        self.result = None
-        self.broker_vars = {}
-
-        self.window = tk.Toplevel(parent)
-        self.window.title("🏦 Chọn Sàn Kết Nối")
-        self.window.geometry("600x500")
-
-        # Center the window
-        screen_width = self.window.winfo_screenwidth()
-        screen_height = self.window.winfo_screenheight()
-        x = (screen_width - 600) // 2
-        y = (screen_height - 500) // 2
-        self.window.geometry(f"600x500+{x}+{y}")
-
-        # Make window modal
-        self.window.transient(parent)
-        self.window.grab_set()
-        self.window.lift()
-        self.window.focus_force()
-
-        # Header
-        header_frame = ttk.Frame(self.window, padding="20")
-        header_frame.pack(fill=tk.X)
-
-        ttk.Label(
-            header_frame,
-            text="Chọn Sàn Để Kết Nối",
-            font=('Arial', 16, 'bold')
-        ).pack()
-
-        ttk.Label(
-            header_frame,
-            text="Chỉ những sàn được chọn sẽ nhận dữ liệu từ EA",
-            font=('Arial', 10),
-            foreground='gray'
-        ).pack(pady=5)
-
-        # Broker list frame
-        list_frame = ttk.LabelFrame(self.window, text="Danh sách Sàn", padding="10")
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Scrollable frame
-        canvas = tk.Canvas(list_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Load available brokers from previous settings
-        available_brokers = self._get_available_brokers()
-        enabled_brokers = broker_selection_settings.get('enabled_brokers', [])
-
-        if not available_brokers:
-            ttk.Label(
-                scrollable_frame,
-                text="Chưa có sàn nào trong dữ liệu.\nVui lòng chạy EA trên MT4/MT5 trước.",
-                font=('Arial', 10),
-                foreground='red'
-            ).pack(pady=20)
-        else:
-            for broker in sorted(available_brokers):
-                var = tk.BooleanVar(value=(broker in enabled_brokers or not enabled_brokers))
-                self.broker_vars[broker] = var
-
-                cb = ttk.Checkbutton(
-                    scrollable_frame,
-                    text=broker,
-                    variable=var,
-                    style='TCheckbutton'
-                )
-                cb.pack(anchor=tk.W, pady=5, padx=10)
-
-        # Buttons
-        button_frame = ttk.Frame(self.window, padding="10")
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
-
-        ttk.Button(
-            button_frame,
-            text="Chọn tất cả",
-            command=self._select_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="Bỏ chọn tất cả",
-            command=self._deselect_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="✅ Xác nhận",
-            command=self._confirm,
-            style='Accent.TButton'
-        ).pack(side=tk.RIGHT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="❌ Hủy",
-            command=self._cancel
-        ).pack(side=tk.RIGHT, padx=5)
-
-        # Handle window close
-        self.window.protocol("WM_DELETE_WINDOW", self._cancel)
-
-    def _get_available_brokers(self):
-        """Lấy danh sách broker từ các nguồn có sẵn"""
-        brokers = set()
-
-        # From market_data (nếu có)
-        brokers.update(market_data.keys())
-
-        # From symbol_filter_settings
-        if 'selection' in symbol_filter_settings:
-            brokers.update(symbol_filter_settings['selection'].keys())
-
-        # From saved broker selection
-        brokers.update(broker_selection_settings.get('enabled_brokers', []))
-
-        # Remove wildcard
-        brokers.discard('*')
-
-        return brokers
-
-    def _select_all(self):
-        """Chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(True)
-
-    def _deselect_all(self):
-        """Bỏ chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(False)
-
-    def _confirm(self):
-        """Xác nhận lựa chọn"""
-        selected = [broker for broker, var in self.broker_vars.items() if var.get()]
-        self.result = selected
-        self.window.destroy()
-
-    def _cancel(self):
-        """Hủy bỏ"""
-        self.result = None
-        self.window.destroy()
-
-    def show(self):
-        """Hiển thị dialog và đợi kết quả"""
-        self.window.wait_window()
-        return self.result
-
-
-class BrokerManagementDialog:
-    """Dialog quản lý sàn với combobox hiển thị sản phẩm"""
-
-    def __init__(self, parent):
-        self.broker_vars = {}
-        self.broker_combos = {}
-
-        self.window = tk.Toplevel(parent)
-        self.window.title("🏦 Quản Lý Sàn")
-        self.window.geometry("900x600")
-
-        # Center the window
-        screen_width = self.window.winfo_screenwidth()
-        screen_height = self.window.winfo_screenheight()
-        x = (screen_width - 900) // 2
-        y = (screen_height - 600) // 2
-        self.window.geometry(f"900x600+{x}+{y}")
-
-        # Make window modal
-        self.window.transient(parent)
-        self.window.grab_set()
-        self.window.lift()
-        self.window.focus_force()
-
-        # Header
-        header_frame = ttk.Frame(self.window, padding="20")
-        header_frame.pack(fill=tk.X)
-
-        ttk.Label(
-            header_frame,
-            text="Quản Lý Sàn",
-            font=('Arial', 16, 'bold')
-        ).pack()
-
-        ttk.Label(
-            header_frame,
-            text="Chọn/bỏ chọn sàn và xem các sản phẩm có trong MarketWatch",
-            font=('Arial', 10),
-            foreground='gray'
-        ).pack(pady=5)
-
-        # Broker list frame
-        list_frame = ttk.LabelFrame(self.window, text="Danh sách Sàn & Sản phẩm", padding="10")
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        # Scrollable frame
-        canvas = tk.Canvas(list_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Load brokers
-        available_brokers = list(market_data.keys())
-        enabled_brokers = broker_selection_settings.get('enabled_brokers', [])
-
-        if not available_brokers:
-            ttk.Label(
-                scrollable_frame,
-                text="Chưa có sàn nào kết nối.\nVui lòng chạy EA trên MT4/MT5.",
-                font=('Arial', 10),
-                foreground='red'
-            ).pack(pady=20)
-        else:
-            for broker in sorted(available_brokers):
-                # Broker frame
-                broker_frame = ttk.Frame(scrollable_frame)
-                broker_frame.pack(fill=tk.X, pady=10, padx=10)
-
-                # Checkbox
-                var = tk.BooleanVar(value=(broker in enabled_brokers or not enabled_brokers))
-                self.broker_vars[broker] = var
-
-                cb = ttk.Checkbutton(
-                    broker_frame,
-                    text=broker,
-                    variable=var,
-                    style='TCheckbutton',
-                    command=lambda b=broker: self._on_broker_toggle(b)
-                )
-                cb.pack(side=tk.LEFT, padx=(0, 10))
-
-                # Combobox for symbols
-                symbols = list(market_data.get(broker, {}).keys())
-                combo = ttk.Combobox(
-                    broker_frame,
-                    values=symbols,
-                    state='readonly',
-                    width=50
-                )
-                if symbols:
-                    combo.set(f"📊 {len(symbols)} sản phẩm - Click để xem")
-                else:
-                    combo.set("Không có sản phẩm")
-
-                combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                self.broker_combos[broker] = combo
-
-        # Buttons
-        button_frame = ttk.Frame(self.window, padding="10")
-        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
-
-        ttk.Button(
-            button_frame,
-            text="Chọn tất cả",
-            command=self._select_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="Bỏ chọn tất cả",
-            command=self._deselect_all
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="💾 Lưu",
-            command=self._save,
-            style='Accent.TButton'
-        ).pack(side=tk.RIGHT, padx=5)
-
-        ttk.Button(
-            button_frame,
-            text="❌ Đóng",
-            command=self.window.destroy
-        ).pack(side=tk.RIGHT, padx=5)
-
-    def _on_broker_toggle(self, broker):
-        """Xử lý khi toggle broker"""
-        is_enabled = self.broker_vars[broker].get()
-        logger.info(f"Broker {broker} {'enabled' if is_enabled else 'disabled'}")
-
-    def _select_all(self):
-        """Chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(True)
-
-    def _deselect_all(self):
-        """Bỏ chọn tất cả broker"""
-        for var in self.broker_vars.values():
-            var.set(False)
-
-    def _save(self):
-        """Lưu cài đặt"""
-        selected = [broker for broker, var in self.broker_vars.items() if var.get()]
-        broker_selection_settings['enabled_brokers'] = selected
-        save_broker_selection_settings()
-        messagebox.showinfo("Thành công", f"Đã lưu {len(selected)} sàn được chọn")
-        self.window.destroy()
-
-
 # ===================== GUI APPLICATION =====================
 class GapSpikeDetectorGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Gap & Spike Detector v2.14.0 - MT4/MT5")
+        self.root.title("Gap & Spike Detector v7.0 - MT4/MT5")
         # Set window to maximized/fullscreen
         self.root.state('zoomed')  # Maximize window (works on Windows)
         # For Linux, try both methods
@@ -3520,6 +3571,9 @@ class GapSpikeDetectorGUI:
         self.setup_ui()
         self.update_display()
         self.update_python_reset_schedule(log_message=False)
+
+        # Start periodic auto-delete task
+        self.start_auto_delete_task()
         
     def setup_ui(self):
         """Thiết lập giao diện"""
@@ -3540,7 +3594,6 @@ class GapSpikeDetectorGUI:
         delay_spinbox.pack(side=tk.LEFT, padx=5)
         ttk.Label(control_frame, text="(⚙️ Cài đặt để xem thêm)", foreground='gray', font=('Arial', 8)).pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(control_frame, text="🏦 Chọn sàn", command=self.open_broker_management).pack(side=tk.RIGHT, padx=5)
         ttk.Button(control_frame, text="Cài đặt", command=self.open_settings).pack(side=tk.RIGHT, padx=5)
         ttk.Button(control_frame, text="📸 Hình ảnh", command=self.open_picture_gallery).pack(side=tk.RIGHT, padx=5)
         ttk.Button(control_frame, text="🔄 Khởi động lại Python", command=self.reset_python_connection,
@@ -3569,7 +3622,35 @@ class GapSpikeDetectorGUI:
         # Delay Board Frame (replaces Connected Brokers)
         delay_frame = ttk.LabelFrame(self.root, text="⏱️ Delay Alert (Bid không đổi)", padding="10")
         delay_frame.pack(fill=tk.X, padx=10, pady=5)
-        
+
+        # ✨ Control frame for sort filter
+        delay_control_frame = ttk.Frame(delay_frame)
+        delay_control_frame.pack(fill=tk.X, pady=(0, 5))
+
+        # ✨ Sort filter dropdown
+        ttk.Label(delay_control_frame, text="Sắp xếp:").pack(side=tk.LEFT, padx=(0, 5))
+        self.delay_sort_mode = tk.StringVar(value="newest_first")  # Default: newest first
+        delay_sort_combo = ttk.Combobox(delay_control_frame, textvariable=self.delay_sort_mode,
+                                       values=["newest_first", "longest_first"],
+                                       state="readonly", width=25)
+        delay_sort_combo.pack(side=tk.LEFT, padx=5)
+        delay_sort_combo.bind('<<ComboboxSelected>>', lambda e: self.update_board())
+
+        # ✨ Sort mode descriptions
+        sort_descriptions = {
+            "newest_first": "Delay mới nhất lên trên",
+            "longest_first": "Delay lâu nhất lên trên"
+        }
+
+        # Display current selection description
+        def update_sort_label(event=None):
+            current = self.delay_sort_mode.get()
+            sort_label.config(text=f"({sort_descriptions.get(current, '')})")
+
+        sort_label = ttk.Label(delay_control_frame, text=f"({sort_descriptions['newest_first']})")
+        sort_label.pack(side=tk.LEFT, padx=5)
+        delay_sort_combo.bind('<<ComboboxSelected>>', lambda e: [update_sort_label(), self.update_board()])
+
         # Create Treeview for delays
         delay_columns = ('Broker', 'Symbol', 'Bid', 'Last Change', 'Delay Time', 'Status')
         self.delay_tree = ttk.Treeview(delay_frame, columns=delay_columns, show='headings', height=4)
@@ -4262,8 +4343,14 @@ class GapSpikeDetectorGUI:
                         'custom_delay_minutes': product_custom_delay_minutes  # Track custom delay for display
                     })
         
-        # Sort by delay duration (longest first)
-        delayed_symbols.sort(key=lambda x: x['delay_duration'], reverse=True)
+        # ✨ Sort theo mode được chọn
+        sort_mode = self.delay_sort_mode.get()
+        if sort_mode == "newest_first":
+            # Delay mới nhất lên trên = last_change_time lớn nhất lên trên
+            delayed_symbols.sort(key=lambda x: x['last_change_time'], reverse=True)
+        else:  # longest_first
+            # Delay lâu nhất lên trên = delay_duration lớn nhất lên trên
+            delayed_symbols.sort(key=lambda x: x['delay_duration'], reverse=True)
         
         # Add to tree
         for item in delayed_symbols:
@@ -4392,18 +4479,45 @@ class GapSpikeDetectorGUI:
             gap_detected = gap_info.get('detected', False)
             spike_detected = spike_info.get('detected', False)
 
-            gap_pct = gap_info.get('percentage', 0)
-            spike_pct = spike_info.get('strength', 0)
+            # ✨ FIX: Hiển thị giá trị thực tế (percent hoặc point) thay vì chỉ ngưỡng
+            # Check if this is point-based or percent-based
+            is_point_based_gap = 'point_gap' in gap_info
+            is_point_based_spike = 'spike_point' in spike_info
 
-            # Get thresholds
-            gap_threshold = get_threshold(broker, symbol, 'gap')
-            spike_threshold = get_threshold(broker, symbol, 'spike')
+            # Gap value display
+            if is_point_based_gap:
+                # Point-based gap: hiển thị point
+                gap_value = gap_info.get('point_gap', 0)
+                gap_pct_str = f"{gap_value:.1f} pt" if gap_detected else "-"
+            else:
+                # Percent-based gap: hiển thị phần trăm
+                gap_pct = gap_info.get('percentage', 0)
+                gap_pct_str = f"{gap_pct:.3f}%" if gap_detected else "-"
 
-            # Format display
-            gap_pct_str = f"{gap_pct:.3f}%" if gap_detected else "-"
-            spike_pct_str = f"{spike_pct:.3f}%" if spike_detected else "-"
-            gap_threshold_str = f"{gap_threshold:.3f}%" if gap_detected else "-"
-            spike_threshold_str = f"{spike_threshold:.3f}%" if spike_detected else "-"
+            # Spike value display
+            if is_point_based_spike:
+                # Point-based spike: hiển thị point
+                spike_value = spike_info.get('spike_point', 0)
+                spike_pct_str = f"{spike_value:.1f} pt" if spike_detected else "-"
+            else:
+                # Percent-based spike: hiển thị phần trăm
+                spike_pct = spike_info.get('strength', 0)
+                spike_pct_str = f"{spike_pct:.3f}%" if spike_detected else "-"
+
+            # Get thresholds for display
+            if is_point_based_gap:
+                gap_threshold_value = gap_info.get('threshold_point', 0)
+                gap_threshold_str = f"{gap_threshold_value:.1f} pt" if gap_detected else "-"
+            else:
+                gap_threshold = get_threshold(broker, symbol, 'gap')
+                gap_threshold_str = f"{gap_threshold:.3f}%" if gap_detected else "-"
+
+            if is_point_based_spike:
+                spike_threshold_value = spike_info.get('threshold_point', 0)
+                spike_threshold_str = f"{spike_threshold_value:.1f} pt" if spike_detected else "-"
+            else:
+                spike_threshold = get_threshold(broker, symbol, 'spike')
+                spike_threshold_str = f"{spike_threshold:.3f}%" if spike_detected else "-"
 
             # Determine alert type
             alert_type_parts = []
@@ -4543,6 +4657,12 @@ class GapSpikeDetectorGUI:
 
             gap_detected = gap_info.get('detected', False)
             spike_detected = spike_info.get('detected', False)
+
+            # ✨ Apply filters (same as Bảng 2)
+            if self.filter_gap_only.get() and not gap_detected:
+                continue
+            if self.filter_spike_only.get() and not spike_detected:
+                continue
 
             # Get values
             default_gap_percent = gap_info.get('default_gap_percent', 0)
@@ -5337,6 +5457,25 @@ class GapSpikeDetectorGUI:
             if reschedule_after and reset_executed and python_reset_settings.get('enabled', False):
                 self.update_python_reset_schedule(log_message=False)
     
+    def start_auto_delete_task(self):
+        """Start periodic auto-delete screenshots task"""
+        # Run immediately on startup
+        threading.Thread(target=auto_delete_old_screenshots, daemon=True).start()
+
+        # Schedule next run
+        self.schedule_auto_delete()
+
+    def schedule_auto_delete(self):
+        """Schedule next auto-delete run"""
+        # Run every 1 hour
+        self.root.after(AUTO_DELETE_INTERVAL * 1000, self._run_auto_delete)
+
+    def _run_auto_delete(self):
+        """Callback to run auto-delete in background thread"""
+        threading.Thread(target=auto_delete_old_screenshots, daemon=True).start()
+        # Schedule next run
+        self.schedule_auto_delete()
+
     def update_python_reset_schedule(self, log_message=True):
         """Schedule or cancel automatic Python reset"""
         if self.python_reset_job:
@@ -5345,10 +5484,10 @@ class GapSpikeDetectorGUI:
             except Exception:
                 pass
             self.python_reset_job = None
-        
+
         enabled = python_reset_settings.get('enabled', False)
         interval_minutes = max(1, int(python_reset_settings.get('interval_minutes', 30) or 30))
-        
+
         if enabled:
             interval_ms = interval_minutes * 60 * 1000
             self.python_reset_job = self.root.after(interval_ms, self._auto_reset_python)
@@ -5552,11 +5691,7 @@ class GapSpikeDetectorGUI:
     def open_settings(self):
         """Mở cửa sổ settings"""
         SettingsWindow(self.root, self)
-
-    def open_broker_management(self):
-        """Mở cửa sổ quản lý sàn"""
-        BrokerManagementDialog(self.root)
-
+    
     def open_trading_hours(self):
         """Mở cửa sổ Trading Hours"""
         TradingHoursWindow(self.root, self)
@@ -6818,66 +6953,85 @@ class RealTimeChartWindow:
         self.broker = broker
         self.symbol = symbol
         self.key = f"{broker}_{symbol}"
-        
+
+        # 🔧 Track last candle data to avoid unnecessary redraws
+        self.last_candle_count = 0
+        self.last_candle_hash = None
+        self.last_bid = None
+        self.last_ask = None
+        self.last_market_open = True
+
         self.window = tk.Toplevel(parent)
         self.window.title(f"📈 {symbol} - {broker} (M1)")
         self.window.geometry("1200x700")
-        
+
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
         self.window.grab_set()  # Chặn input đến parent window
-        
+
         self.window.lift()  # Đưa cửa sổ lên trên
         self.window.focus_force()  # Focus vào cửa sổ
-        
+
         # Top Frame - Info
         info_frame = ttk.Frame(self.window, padding="10")
         info_frame.pack(fill=tk.X)
-        
+
         ttk.Label(info_frame, text=f"📊 {symbol}", font=('Arial', 16, 'bold')).pack(side=tk.LEFT, padx=10)
         ttk.Label(info_frame, text=f"Broker: {broker}", font=('Arial', 10)).pack(side=tk.LEFT, padx=10)
-        
+
         self.price_label = ttk.Label(info_frame, text="Bid: --- | Ask: ---", font=('Arial', 12, 'bold'))
         self.price_label.pack(side=tk.LEFT, padx=20)
-        
+
+        # 🔧 Add delay status label
+        self.delay_label = ttk.Label(info_frame, text="", font=('Arial', 10, 'bold'), foreground='orange')
+        self.delay_label.pack(side=tk.LEFT, padx=10)
+
         self.candle_count_label = ttk.Label(info_frame, text="Candles: 0/60", font=('Arial', 10))
         self.candle_count_label.pack(side=tk.LEFT, padx=10)
-        
+
+        # ✨ NEW: Button to open chart in MT4/MT5
+        open_mt_btn = ttk.Button(
+            info_frame,
+            text="🔷 Mở Chart Sàn",
+            command=self.open_chart_in_mt45
+        )
+        open_mt_btn.pack(side=tk.RIGHT, padx=5)
+
         self.time_label = ttk.Label(info_frame, text="", font=('Arial', 10))
         self.time_label.pack(side=tk.RIGHT, padx=10)
-        
+
         # Chart Frame
         chart_frame = ttk.Frame(self.window)
         chart_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         # Create matplotlib figure
         self.fig = Figure(figsize=(12, 6), dpi=100, facecolor='#1e1e1e')
         self.ax = self.fig.add_subplot(111, facecolor='#2d2d30')
-        
+
         # Canvas
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        
+
         # Configure plot style
         self.ax.tick_params(colors='white', labelsize=9)
         self.ax.spines['bottom'].set_color('#404040')
-        self.ax.spines['top'].set_color('#404040') 
+        self.ax.spines['top'].set_color('#404040')
         self.ax.spines['right'].set_color('#404040')
         self.ax.spines['left'].set_color('#404040')
         self.ax.grid(True, alpha=0.2, color='#404040', linestyle='--')
-        
+
         # Current bid/ask for horizontal lines
         self.bid_line = None
         self.ask_line = None
-        
+
         # Initial draw
         self.update_chart()
-        
+
         # Auto-refresh every 1 second
         self.is_running = True
         self.auto_refresh()
-        
+
         # Cleanup on close
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
     
@@ -6885,48 +7039,504 @@ class RealTimeChartWindow:
         """Cleanup khi đóng window"""
         self.is_running = False
         self.window.destroy()
-    
-    def draw_candlesticks(self, candles):
+
+    def open_chart_in_mt45(self):
+        """
+        Mở chart trong MT4/MT5 bằng automation (Windows + Linux)
+
+        Workflow:
+        1. Focus vào window sàn (tìm theo broker name)
+        2. Ctrl+M → Mở Market Watch
+        3. Home → Select first symbol
+        4. Gõ tên symbol
+        5. Chuột phải
+        6. Mũi tên xuống 2 lần
+        7. Enter
+        """
+        import platform
+        import time as time_module
+
+        # Get symbol without suffix (remove .SI, .XX, etc)
+        symbol_clean = self.symbol.split('.')[0]
+
+        logger.info(f"[MT4/MT5] Opening chart for {symbol_clean} on broker {self.broker}")
+        logger.info(f"[MT4/MT5] Detected OS: {platform.system()}")
+
+        try:
+            if platform.system() == "Windows":
+                self._open_chart_windows(symbol_clean)
+            else:
+                self._open_chart_linux(symbol_clean)
+        except Exception as e:
+            logger.error(f"[MT4/MT5] Error opening chart: {e}")
+            messagebox.showerror(
+                "Lỗi",
+                f"Không thể mở chart trong MT4/MT5.\n\nLỗi: {e}"
+            )
+
+    def _open_chart_windows(self, symbol_clean):
+        """Open chart in MT4/MT5 on Windows using pygetwindow + pyautogui"""
+        try:
+            import pygetwindow as gw
+            import pyautogui
+            import time as time_module
+
+            logger.info("[MT4/MT5 Windows] Searching for window...")
+
+            # Find MT4/MT5 window (EXCLUDE Python chart windows)
+            import re
+            all_windows = gw.getAllWindows()
+            target_window = None
+
+            # Keywords to EXCLUDE (Python/Tkinter windows)
+            exclude_keywords = ["python", "tk", "tkinter", "idle", "pycharm", "vscode"]
+
+            # Pattern to detect Python chart windows: "SYMBOL-Broker-Account(M1)" or "(H1)" etc
+            # Timeframes: M1, M5, M15, M30, H1, H4, D1, W1, MN
+            timeframe_pattern = re.compile(r'\([MHDWm][0-9NM]*\)$', re.IGNORECASE)
+
+            search_terms = [self.broker, "MetaTrader", "MT4", "MT5", "terminal"]
+
+            for term in search_terms:
+                for window in all_windows:
+                    title_lower = window.title.lower()
+
+                    # Skip if window title contains Python/Tkinter keywords
+                    is_python_window = any(excl in title_lower for excl in exclude_keywords)
+                    if is_python_window:
+                        logger.debug(f"[MT4/MT5 Windows] Skipping Python window: '{window.title}'")
+                        continue
+
+                    # Skip if window title ends with timeframe pattern (Python chart window)
+                    # Example: "ADA-Amakets-Real(M1)" <- Python chart, NOT MT4/MT5 terminal
+                    if timeframe_pattern.search(window.title):
+                        logger.debug(f"[MT4/MT5 Windows] Skipping Python chart window: '{window.title}'")
+                        continue
+
+                    # Check if window matches search term
+                    if term.lower() in title_lower:
+                        target_window = window
+                        logger.info(f"[MT4/MT5 Windows] Found MT4/MT5 window: '{window.title}'")
+                        break
+                if target_window:
+                    break
+
+            if not target_window:
+                # Filter out Python windows from error message too
+                window_titles = [
+                    w.title for w in all_windows
+                    if w.title.strip() and not any(excl in w.title.lower() for excl in exclude_keywords)
+                ]
+                logger.warning(f"[MT4/MT5 Windows] Available non-Python windows: {window_titles[:10]}")
+
+                messagebox.showerror(
+                    "Không tìm thấy window",
+                    f"Không tìm thấy window MT4/MT5 cho broker '{self.broker}'.\n\n"
+                    f"Các window đang mở (không bao gồm Python): {', '.join(window_titles[:5])}\n\n"
+                    f"Tìm kiếm: {', '.join(search_terms)}"
+                )
+                return
+
+            # ═══════════════════════════════════════════════════════════════════
+            # FORCE FOCUS WINDOW - Multiple attempts to ensure window is active
+            # ═══════════════════════════════════════════════════════════════════
+            logger.info(f"[MT4/MT5 Windows] Window state: Minimized={target_window.isMinimized}, Maximized={target_window.isMaximized}, Active={target_window.isActive}")
+
+            # Step 1: Restore if minimized
+            if target_window.isMinimized:
+                logger.info("[MT4/MT5 Windows] Restoring minimized window...")
+                target_window.restore()
+                time_module.sleep(0.5)
+
+            # Step 2: Activate window (bring to front)
+            logger.info("[MT4/MT5 Windows] Activating window...")
+            target_window.activate()
+            time_module.sleep(0.3)
+
+            # Step 3: Maximize window to ensure visibility
+            if not target_window.isMaximized:
+                logger.info("[MT4/MT5 Windows] Maximizing window...")
+                try:
+                    target_window.maximize()
+                    time_module.sleep(0.3)
+                except:
+                    logger.warning("[MT4/MT5 Windows] Could not maximize window")
+
+            # Step 4: Force focus by clicking on window center
+            logger.info("[MT4/MT5 Windows] Clicking window to force focus...")
+            try:
+                # Get window position and size
+                win_left = target_window.left
+                win_top = target_window.top
+                win_width = target_window.width
+                win_height = target_window.height
+
+                # Click on center of window
+                center_x = win_left + (win_width // 2)
+                center_y = win_top + (win_height // 2)
+
+                logger.info(f"[MT4/MT5 Windows] Window bounds: left={win_left}, top={win_top}, width={win_width}, height={win_height}")
+                logger.info(f"[MT4/MT5 Windows] Clicking at center: ({center_x}, {center_y})")
+
+                pyautogui.click(center_x, center_y)
+                time_module.sleep(0.5)
+            except Exception as e:
+                logger.warning(f"[MT4/MT5 Windows] Could not click window: {e}")
+
+            # Step 5: Verify window is now active
+            time_module.sleep(0.3)
+            logger.info(f"[MT4/MT5 Windows] Window state after activation: Active={target_window.isActive}")
+
+            if not target_window.isActive:
+                logger.warning("[MT4/MT5 Windows] Window may not be active! Trying one more time...")
+                target_window.activate()
+                time_module.sleep(0.5)
+                pyautogui.click(center_x, center_y)
+                time_module.sleep(0.5)
+
+            # ═══════════════════════════════════════════════════════════════════
+            # NOW SEND KEYBOARD COMMANDS
+            # ═══════════════════════════════════════════════════════════════════
+
+            # Ctrl+M - Open Market Watch
+            logger.info("[MT4/MT5 Windows] Sending Ctrl+M to open Market Watch")
+            pyautogui.hotkey('ctrl', 'm')
+            time_module.sleep(0.8)
+
+            # Search for Market Watch window by title
+            logger.info("[MT4/MT5 Windows] Searching for 'Market Watch' window...")
+            market_watch_window = None
+            all_windows_after = gw.getAllWindows()
+
+            for window in all_windows_after:
+                if "market watch" in window.title.lower():
+                    market_watch_window = window
+                    logger.info(f"[MT4/MT5 Windows] Found Market Watch window: '{window.title}'")
+                    break
+
+            if market_watch_window:
+                # Get Market Watch window position and size
+                mw_left = market_watch_window.left
+                mw_top = market_watch_window.top
+                mw_width = market_watch_window.width
+                mw_height = market_watch_window.height
+
+                # Calculate center of Market Watch window
+                market_watch_center_x = mw_left + (mw_width // 2)
+                market_watch_center_y = mw_top + (mw_height // 2)
+
+                logger.info(f"[MT4/MT5 Windows] Market Watch bounds: left={mw_left}, top={mw_top}, width={mw_width}, height={mw_height}")
+                logger.info(f"[MT4/MT5 Windows] Clicking Market Watch center at ({market_watch_center_x}, {market_watch_center_y})")
+
+                # Focus and click center of Market Watch
+                market_watch_window.activate()
+                time_module.sleep(0.3)
+                pyautogui.click(market_watch_center_x, market_watch_center_y)
+                time_module.sleep(0.4)
+
+                # Use Market Watch position for symbol clicking later
+                symbol_click_x = market_watch_center_x
+                symbol_click_y = mw_top + 80  # Symbol list starts ~80px from top of Market Watch
+            else:
+                # Fallback: Calculate Market Watch position within main terminal (legacy behavior)
+                logger.warning("[MT4/MT5 Windows] Market Watch window not found, using fallback position")
+                market_watch_width = int(win_width * 0.18)
+                market_watch_center_x = win_left + (market_watch_width // 2)
+                market_watch_center_y = win_top + 150
+
+                pyautogui.click(market_watch_center_x, market_watch_center_y)
+                time_module.sleep(0.4)
+
+                symbol_click_x = market_watch_center_x
+                symbol_click_y = win_top + 100
+
+            # Type symbol name (MT4/MT5 will auto-scroll and focus on matching symbol)
+            logger.info(f"[MT4/MT5 Windows] Typing symbol: {symbol_clean}")
+            pyautogui.write(symbol_clean, interval=0.08)
+            time_module.sleep(0.6)
+
+            # After typing, MT4/MT5 automatically focuses on the matched symbol
+            # Use Shift+F10 to open context menu on the focused item (no need to click position)
+            logger.info("[MT4/MT5 Windows] Opening context menu with Shift+F10 on focused symbol")
+            pyautogui.hotkey('shift', 'f10')
+            time_module.sleep(0.5)
+
+            # Down arrow x2 - Navigate to "Chart Window"
+            logger.info("[MT4/MT5 Windows] Pressing Down arrow x2 to navigate")
+            pyautogui.press('down')
+            time_module.sleep(0.15)
+            pyautogui.press('down')
+            time_module.sleep(0.3)
+
+            # Enter - Open chart
+            logger.info("[MT4/MT5 Windows] Pressing Enter to open chart")
+            pyautogui.press('enter')
+            time_module.sleep(0.5)
+
+            # Ctrl+M - Close Market Watch
+            logger.info("[MT4/MT5 Windows] Sending Ctrl+M to close Market Watch")
+            pyautogui.hotkey('ctrl', 'm')
+            time_module.sleep(0.3)
+
+            logger.info(f"[MT4/MT5 Windows] Successfully completed automation for {symbol_clean}")
+
+        except ImportError as e:
+            logger.error(f"[MT4/MT5 Windows] Missing library: {e}")
+            messagebox.showerror(
+                "Thiếu thư viện",
+                "Chưa cài đặt pygetwindow hoặc pyautogui.\n\n"
+                "Cài đặt bằng lệnh:\n"
+                "pip install pygetwindow pyautogui"
+            )
+        except Exception as e:
+            logger.error(f"[MT4/MT5 Windows] Error: {e}")
+            raise
+
+    def _open_chart_linux(self, symbol_clean):
+        """Open chart in MT4/MT5 on Linux using xdotool + wmctrl"""
+        import subprocess
+        import time as time_module
+        import re
+
+        # Keywords to EXCLUDE (Python/Tkinter windows)
+        exclude_keywords = ["python", "tk", "tkinter", "idle", "pycharm", "vscode"]
+
+        # Pattern to detect Python chart windows: "SYMBOL-Broker-Account(M1)" or "(H1)" etc
+        # Timeframes: M1, M5, M15, M30, H1, H4, D1, W1, MN
+        timeframe_pattern = re.compile(r'\([MHDWm][0-9NM]*\)$', re.IGNORECASE)
+
+        search_terms = [self.broker, "MetaTrader", "MT4", "MT5"]
+        window_id = None
+
+        for term in search_terms:
+            try:
+                result = subprocess.run(
+                    ['wmctrl', '-l'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        line_lower = line.lower()
+
+                        # Skip Python windows
+                        is_python_window = any(excl in line_lower for excl in exclude_keywords)
+                        if is_python_window:
+                            logger.debug(f"[MT4/MT5 Linux] Skipping Python window: {line.strip()}")
+                            continue
+
+                        # Skip if line ends with timeframe pattern (Python chart window)
+                        # Example: "ADA-Amakets-Real(M1)" <- Python chart, NOT MT4/MT5 terminal
+                        if timeframe_pattern.search(line):
+                            logger.debug(f"[MT4/MT5 Linux] Skipping Python chart window: {line.strip()}")
+                            continue
+
+                        # Check if matches search term
+                        if term.lower() in line_lower:
+                            window_id = line.split()[0]
+                            logger.info(f"[MT4/MT5 Linux] Found MT4/MT5 window: {line.strip()}")
+                            break
+
+                if window_id:
+                    break
+            except Exception as e:
+                logger.warning(f"[MT4/MT5 Linux] wmctrl error: {e}")
+                continue
+
+        if not window_id:
+            messagebox.showerror(
+                "Không tìm thấy window",
+                f"Không tìm thấy window MT4/MT5 cho broker '{self.broker}'.\n\n"
+                "Cài đặt: sudo apt-get install xdotool wmctrl"
+            )
+            return
+
+        try:
+            logger.info(f"[MT4/MT5 Linux] Focus {window_id}")
+            subprocess.run(['xdotool', 'windowactivate', '--sync', window_id], timeout=2)
+            time_module.sleep(0.3)
+
+            # Get window geometry to calculate Market Watch position
+            result = subprocess.run(
+                ['xdotool', 'getwindowgeometry', window_id],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+
+            # Parse window position and size from output
+            # Example output: "Position: 0,0 (screen: 0)\n  Geometry: 1920x1080"
+            win_x, win_y, win_width, win_height = 0, 0, 1920, 1080  # defaults
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'Position:' in line:
+                        pos_part = line.split('Position:')[1].split('(')[0].strip()
+                        win_x, win_y = map(int, pos_part.split(','))
+                    elif 'Geometry:' in line:
+                        geom_part = line.split('Geometry:')[1].strip()
+                        win_width, win_height = map(int, geom_part.split('x'))
+                logger.info(f"[MT4/MT5 Linux] Window: x={win_x}, y={win_y}, w={win_width}, h={win_height}")
+
+            logger.info("[MT4/MT5 Linux] Ctrl+M")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+m'], timeout=2)
+            time_module.sleep(0.8)
+
+            # Search for Market Watch window by title
+            logger.info("[MT4/MT5 Linux] Searching for 'Market Watch' window...")
+            market_watch_id = None
+
+            try:
+                result = subprocess.run(
+                    ['wmctrl', '-l'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if "market watch" in line.lower():
+                            market_watch_id = line.split()[0]
+                            logger.info(f"[MT4/MT5 Linux] Found Market Watch window: {line.strip()}")
+                            break
+            except Exception as e:
+                logger.warning(f"[MT4/MT5 Linux] Could not search for Market Watch: {e}")
+
+            if market_watch_id:
+                # Get Market Watch window geometry
+                result = subprocess.run(
+                    ['xdotool', 'getwindowgeometry', market_watch_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                mw_x, mw_y, mw_width, mw_height = win_x, win_y, 300, 400  # defaults
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'Position:' in line:
+                            pos_part = line.split('Position:')[1].split('(')[0].strip()
+                            mw_x, mw_y = map(int, pos_part.split(','))
+                        elif 'Geometry:' in line:
+                            geom_part = line.split('Geometry:')[1].strip()
+                            mw_width, mw_height = map(int, geom_part.split('x'))
+                    logger.info(f"[MT4/MT5 Linux] Market Watch: x={mw_x}, y={mw_y}, w={mw_width}, h={mw_height}")
+
+                # Calculate center of Market Watch window
+                market_watch_center_x = mw_x + (mw_width // 2)
+                market_watch_center_y = mw_y + (mw_height // 2)
+
+                # Focus and click Market Watch center
+                subprocess.run(['xdotool', 'windowactivate', '--sync', market_watch_id], timeout=2)
+                time_module.sleep(0.3)
+
+                logger.info(f"[MT4/MT5 Linux] Clicking Market Watch center at ({market_watch_center_x}, {market_watch_center_y})")
+                subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
+                subprocess.run(['xdotool', 'click', '1'], timeout=2)
+                time_module.sleep(0.4)
+
+                # Use Market Watch position for symbol clicking
+                symbol_click_x = market_watch_center_x
+                symbol_click_y = mw_y + 80
+            else:
+                # Fallback: Calculate Market Watch position within main terminal
+                logger.warning("[MT4/MT5 Linux] Market Watch window not found, using fallback position")
+                market_watch_width = int(win_width * 0.18)
+                market_watch_center_x = win_x + (market_watch_width // 2)
+                market_watch_center_y = win_y + 150
+
+                subprocess.run(['xdotool', 'mousemove', str(market_watch_center_x), str(market_watch_center_y)], timeout=2)
+                subprocess.run(['xdotool', 'click', '1'], timeout=2)
+                time_module.sleep(0.4)
+
+                symbol_click_x = market_watch_center_x
+                symbol_click_y = win_y + 100
+
+            # Type symbol name
+            logger.info(f"[MT4/MT5 Linux] Type: {symbol_clean}")
+            subprocess.run(['xdotool', 'type', '--clearmodifiers', symbol_clean], timeout=2)
+            time_module.sleep(0.6)
+
+            # After typing, MT4/MT5 automatically focuses on the matched symbol
+            # Use Shift+F10 to open context menu on the focused item
+            logger.info("[MT4/MT5 Linux] Opening context menu with Shift+F10 on focused symbol")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'shift+F10'], timeout=2)
+            time_module.sleep(0.5)
+
+            logger.info("[MT4/MT5 Linux] Down x2")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
+            time_module.sleep(0.1)
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Down'], timeout=2)
+            time_module.sleep(0.2)
+
+            logger.info("[MT4/MT5 Linux] Enter")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], timeout=2)
+            time_module.sleep(0.5)
+
+            # Ctrl+M - Close Market Watch
+            logger.info("[MT4/MT5 Linux] Ctrl+M to close Market Watch")
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+m'], timeout=2)
+            time_module.sleep(0.3)
+
+            logger.info(f"[MT4/MT5 Linux] Success for {symbol_clean}")
+
+        except Exception as e:
+            logger.error(f"[MT4/MT5 Linux] Error: {e}")
+            messagebox.showerror("Lỗi", f"Không thể mở chart.\n\nLỗi: {e}")
+
+    def draw_candlesticks(self, candles, is_market_open=True):
         """Vẽ candlestick chart"""
         # Clear previous plot
         self.ax.clear()
-        
+
+        # 🔒 Check if market is closed
+        if not is_market_open:
+            if not candles:
+                # Market closed AND no candle data - show message
+                self.ax.text(0.5, 0.5, '🔒 ĐANG ĐÓNG CỬA\n\nChưa có dữ liệu nến',
+                            ha='center', va='center', fontsize=14, color='orange',
+                            transform=self.ax.transAxes, weight='bold')
+                return
+            # Else: Market closed but has old candles - continue to draw them
+
         if not candles:
             # No candles yet - show message
             self.ax.text(0.5, 0.5, 'Đang tích lũy nến M1...\nVui lòng đợi ít phút để chart hiển thị',
                         ha='center', va='center', fontsize=12, color='white',
                         transform=self.ax.transAxes)
             return
-        
+
         # Get last 60 candles (or less if not enough yet)
         candles_to_show = candles[-60:] if len(candles) >= 60 else candles
-        
+
         # Draw candlesticks
         for i, (ts, o, h, l, c) in enumerate(candles_to_show):
             # Color: green if close > open, red if close < open
             color = '#26a69a' if c >= o else '#ef5350'
             wick_color = color
-            
+
             # Draw high-low wick (thân nến)
             self.ax.plot([i, i], [l, h], color=wick_color, linewidth=1, solid_capstyle='round')
-            
+
             # Draw open-close body (hình chữ nhật)
             body_height = abs(c - o)
             body_bottom = min(o, c)
-            
-            rect = Rectangle((i - 0.4, body_bottom), 0.8, body_height, 
+
+            rect = Rectangle((i - 0.4, body_bottom), 0.8, body_height,
                            facecolor=color, edgecolor=color, linewidth=1)
             self.ax.add_patch(rect)
-        
+
         # Configure axes
         self.ax.set_xlim(-1, len(candles_to_show))
-        
+
         # Y-axis (price)
         prices = [h for _, _, h, _, _ in candles_to_show] + [l for _, _, _, l, _ in candles_to_show]
         if prices:
             y_margin = (max(prices) - min(prices)) * 0.1
             self.ax.set_ylim(min(prices) - y_margin, max(prices) + y_margin)
-        
+
         # X-axis labels (time)
         x_positions = list(range(0, len(candles_to_show), max(1, len(candles_to_show) // 10)))
         x_labels = []
@@ -6934,74 +7544,160 @@ class RealTimeChartWindow:
             if pos < len(candles_to_show):
                 ts = candles_to_show[pos][0]
                 x_labels.append(server_timestamp_to_datetime(ts).strftime('%H:%M'))
-        
+
         self.ax.set_xticks(x_positions)
         self.ax.set_xticklabels(x_labels, rotation=45, ha='right')
-        
+
         # Labels
         self.ax.set_xlabel('Time (M1)', color='white', fontsize=10)
         self.ax.set_ylabel('Price', color='white', fontsize=10)
         self.ax.set_title(f'{self.symbol} - M1 Chart', color='white', fontsize=12, pad=10)
-        
+
         # Grid
         self.ax.grid(True, alpha=0.2, color='#404040', linestyle='--')
-        
+
         # Style
         self.ax.tick_params(colors='white', labelsize=9)
         self.ax.spines['bottom'].set_color('#404040')
         self.ax.spines['top'].set_color('#404040')
         self.ax.spines['right'].set_color('#404040')
         self.ax.spines['left'].set_color('#404040')
+
+        # 🔒 Add overlay warning if market is closed
+        if not is_market_open:
+            # Add semi-transparent overlay text
+            self.ax.text(0.5, 0.9, '🔒 ĐANG ĐÓNG CỬA',
+                        ha='center', va='center', fontsize=16, color='orange',
+                        transform=self.ax.transAxes, weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='black', alpha=0.7, edgecolor='orange'))
     
     def update_chart(self):
         """Update chart với data mới"""
         try:
             with data_lock:
+                # 🔧 Check if product is delayed
+                current_time = time.time()
+                is_delayed = False
+                delay_duration = 0
+
+                if self.key in bid_tracking:
+                    last_change_time = bid_tracking[self.key]['last_change_time']
+                    delay_duration = current_time - last_change_time
+
+                    # Get custom delay threshold for this product (in minutes)
+                    product_custom_delay_minutes = product_delay_settings.get(self.key, None)
+                    if product_custom_delay_minutes is not None:
+                        delay_threshold = product_custom_delay_minutes * 60  # Convert to seconds
+                    else:
+                        delay_threshold = delay_settings.get('threshold', 300)
+
+                    is_delayed = delay_duration >= delay_threshold
+
+                # 🔒 Check if market is open
+                is_market_open = True
+                if self.broker in market_data and self.symbol in market_data[self.broker]:
+                    symbol_data = market_data[self.broker][self.symbol]
+                    is_market_open = symbol_data.get('isOpen', True)
+
                 # Get candle data
                 candles = candle_data.get(self.key, [])
-                
+
+                # 🔧 Create hash of candle data to detect changes
+                if candles:
+                    # Use last 3 candles for hash (timestamp + close price)
+                    last_candles = candles[-3:] if len(candles) >= 3 else candles
+                    candle_hash = hash(tuple((ts, c) for ts, _, _, _, c in last_candles))
+                else:
+                    candle_hash = None
+
+                # 🔧 Only redraw chart if candle data changed OR market open status changed OR first time
+                should_redraw_chart = (
+                    candle_hash != self.last_candle_hash or
+                    len(candles) != self.last_candle_count or
+                    self.last_candle_hash is None or
+                    (hasattr(self, 'last_market_open') and is_market_open != self.last_market_open)
+                )
+
                 # Update candle count label
                 candle_count = len(candles)
                 max_candles = 60
                 self.candle_count_label.config(text=f"Candles: {candle_count}/{max_candles}")
-                
-                # Draw candlesticks
-                self.draw_candlesticks(candles)
-                
-                # Get current bid/ask
+
+                # 🔧 Update delay status label
+                if is_delayed:
+                    delay_minutes = int(delay_duration / 60)
+                    delay_seconds = int(delay_duration % 60)
+                    self.delay_label.config(text=f"⚠️ DELAY: {delay_minutes}m {delay_seconds}s")
+                else:
+                    self.delay_label.config(text="")
+
+                # 🔧 Track if we need to redraw canvas
+                needs_canvas_redraw = False
+
+                # 🔧 Draw candlesticks ONLY if data changed
+                if should_redraw_chart:
+                    self.draw_candlesticks(candles, is_market_open)
+                    self.last_candle_hash = candle_hash
+                    self.last_candle_count = len(candles)
+                    self.last_market_open = is_market_open
+                    needs_canvas_redraw = True
+
+                # 🔧 Update bid/ask lines ONLY if bid/ask changed
+                # This prevents unnecessary redraws when prices don't change
                 if self.broker in market_data and self.symbol in market_data[self.broker]:
                     symbol_data = market_data[self.broker][self.symbol]
                     bid = symbol_data.get('bid', 0)
                     ask = symbol_data.get('ask', 0)
                     digits = symbol_data.get('digits', 5)
-                    
-                    # Draw bid/ask lines
-                    if bid > 0 and ask > 0:
-                        # Bid line (red)
+
+                    # Check if bid/ask changed
+                    bid_ask_changed = (bid != self.last_bid or ask != self.last_ask)
+
+                    # Draw bid/ask lines ONLY if they changed OR chart was redrawn
+                    if bid > 0 and ask > 0 and (bid_ask_changed or should_redraw_chart):
+                        # Remove old lines
                         if self.bid_line:
-                            self.bid_line.remove()
-                        self.bid_line = self.ax.axhline(y=bid, color='#ef5350', linestyle='--', 
-                                                        linewidth=1.5, alpha=0.8, label=f'Bid: {bid:.{digits}f}')
-                        
-                        # Ask line (green)
+                            try:
+                                self.bid_line.remove()
+                            except:
+                                pass
                         if self.ask_line:
-                            self.ask_line.remove()
-                        self.ask_line = self.ax.axhline(y=ask, color='#26a69a', linestyle='--', 
+                            try:
+                                self.ask_line.remove()
+                            except:
+                                pass
+
+                        # Bid line (red)
+                        self.bid_line = self.ax.axhline(y=bid, color='#ef5350', linestyle='--',
+                                                        linewidth=1.5, alpha=0.8, label=f'Bid: {bid:.{digits}f}')
+
+                        # Ask line (green)
+                        self.ask_line = self.ax.axhline(y=ask, color='#26a69a', linestyle='--',
                                                         linewidth=1.5, alpha=0.8, label=f'Ask: {ask:.{digits}f}')
-                        
+
                         # Legend
-                        self.ax.legend(loc='upper left', fontsize=9, facecolor='#2d2d30', 
+                        self.ax.legend(loc='upper left', fontsize=9, facecolor='#2d2d30',
                                      edgecolor='#404040', labelcolor='white')
-                        
-                        # Update price label
+
+                        # Update last bid/ask
+                        self.last_bid = bid
+                        self.last_ask = ask
+                        needs_canvas_redraw = True
+
+                    # Update price label (always update, even if not redrawn)
+                    if bid > 0 and ask > 0:
                         self.price_label.config(text=f"Bid: {bid:.{digits}f} | Ask: {ask:.{digits}f}")
-                
+                else:
+                    # No market data available
+                    self.price_label.config(text="Bid: --- | Ask: ---")
+
                 # Update time label
                 self.time_label.config(text=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                
-                # Redraw canvas
-                self.canvas.draw()
-                
+
+                # 🔧 Redraw canvas ONLY if something changed
+                if needs_canvas_redraw:
+                    self.canvas.draw()
+
         except Exception as e:
             logger.error(f"Error updating chart: {e}")
     
@@ -7260,14 +7956,27 @@ class SettingsWindow:
         y = (screen_height - window_height) // 2
 
         self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
+
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
         self.window.grab_set()  # Chặn input đến parent window
-        
+
         self.window.lift()  # Đưa cửa sổ lên trên
         self.window.focus_force()  # Focus vào cửa sổ
-        
+
+        # ✨ Top control frame with maximize button
+        top_control_frame = ttk.Frame(self.window)
+        top_control_frame.pack(fill=tk.X, padx=10, pady=(5, 0))
+
+        # ✨ Maximize/Restore button
+        self.is_maximized = False
+        self.maximize_button = ttk.Button(
+            top_control_frame,
+            text="🔲 Phóng to toàn màn hình",
+            command=self.toggle_maximize
+        )
+        self.maximize_button.pack(side=tk.RIGHT, padx=5)
+
         # Notebook for tabs
         self.notebook = ttk.Notebook(self.window)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -7281,14 +7990,18 @@ class SettingsWindow:
         # Tab 3: Gap/Spike Settings
         self.create_gap_spike_settings_tab()
 
-        # Tab 4: Symbol Filter
-        self.create_symbol_filter_tab()
+        # Tab 4: Symbol Filter - REMOVED (không cần thiết)
+        # self.create_symbol_filter_tab()
 
         # Tab 5: Screenshot Settings
         self.create_screenshot_settings_tab()
 
         # Tab 6: Manual Hidden List
         self.create_hidden_list_tab()
+
+        # Tab 6.5: Filtered Symbols (NEW)
+        self.create_filtered_symbols_tab()
+        # Note: Refresh chỉ khi khởi động và khi restart, không auto 5s
 
         # Tab 7: Tools
         self.create_tools_tab()
@@ -8521,7 +9234,40 @@ Cách sử dụng:
                                    textvariable=self.screenshot_startup_delay_var)
         delay_spinbox.pack(side=tk.LEFT, padx=5)
         ttk.Label(delay_input_frame, text="(0 = không delay, max 60 phút)").pack(side=tk.LEFT, padx=5)
-        
+
+        # Auto-delete settings
+        autodel_frame = ttk.LabelFrame(screenshot_frame, text="🗑️ Tự động xóa hình ảnh cũ", padding="10")
+        autodel_frame.pack(fill=tk.X, pady=5)
+
+        self.auto_delete_enabled_var = tk.BooleanVar(value=screenshot_settings.get('auto_delete_enabled', False))
+        ttk.Checkbutton(autodel_frame, text="✅ Bật tự động xóa hình ảnh cũ",
+                       variable=self.auto_delete_enabled_var).pack(anchor=tk.W, pady=5)
+
+        autodel_info_label = ttk.Label(autodel_frame,
+                                       text="Tự động xóa các ảnh chụp cũ hơn thời gian cấu hình:",
+                                       foreground='blue')
+        autodel_info_label.pack(anchor=tk.W, pady=5)
+
+        autodel_input_frame = ttk.Frame(autodel_frame)
+        autodel_input_frame.pack(anchor=tk.W, pady=5)
+
+        ttk.Label(autodel_input_frame, text="Xóa sau (giờ):").pack(side=tk.LEFT, padx=5)
+        self.auto_delete_hours_var = tk.IntVar(value=screenshot_settings.get('auto_delete_hours', 48))
+        autodel_spinbox = ttk.Spinbox(autodel_input_frame, from_=1, to=168, width=10,
+                                      textvariable=self.auto_delete_hours_var)
+        autodel_spinbox.pack(side=tk.LEFT, padx=5)
+        ttk.Label(autodel_input_frame, text="(1-168 giờ / 1-7 ngày)").pack(side=tk.LEFT, padx=5)
+
+        autodel_warning_label = ttk.Label(autodel_frame,
+                                         text="⚠️ Hình ảnh sẽ bị XÓA VĨNH VIỄN (không qua Recycle bin)",
+                                         foreground='red', font=('Arial', 9, 'bold'))
+        autodel_warning_label.pack(anchor=tk.W, pady=5)
+
+        autodel_note_label = ttk.Label(autodel_frame,
+                                       text="📌 Kiểm tra định kỳ mỗi 1 giờ. Mặc định: 48 giờ (2 ngày)",
+                                       foreground='gray', font=('Arial', 8))
+        autodel_note_label.pack(anchor=tk.W, pady=2)
+
         # Info
         info_frame = ttk.Frame(screenshot_frame)
         info_frame.pack(fill=tk.X, pady=10)
@@ -8553,6 +9299,8 @@ Cách sử dụng:
             screenshot_settings['save_spike'] = self.screenshot_spike_var.get()
             screenshot_settings['folder'] = self.screenshot_folder_var.get()
             screenshot_settings['startup_delay_minutes'] = self.screenshot_startup_delay_var.get()
+            screenshot_settings['auto_delete_enabled'] = self.auto_delete_enabled_var.get()
+            screenshot_settings['auto_delete_hours'] = self.auto_delete_hours_var.get()
 
             schedule_save('screenshot_settings')
             ensure_pictures_folder()
@@ -8563,7 +9311,9 @@ Cách sử dụng:
                               f"- Save Gap: {screenshot_settings['save_gap']}\n"
                               f"- Save Spike: {screenshot_settings['save_spike']}\n"
                               f"- Folder: {screenshot_settings['folder']}\n"
-                              f"- Startup delay: {screenshot_settings['startup_delay_minutes']} phút")
+                              f"- Startup delay: {screenshot_settings['startup_delay_minutes']} phút\n"
+                              f"- Auto-delete: {screenshot_settings['auto_delete_enabled']}\n"
+                              f"- Auto-delete after: {screenshot_settings['auto_delete_hours']} giờ")
         except Exception as e:
             logger.error(f"Error saving screenshot settings: {e}")
             messagebox.showerror("Error", f"Failed to save: {str(e)}")
@@ -8697,6 +9447,342 @@ Cách sử dụng:
         # Initial load
         self.refresh_all_hidden_lists()
     
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ✨ NEW TAB: Filtered Symbols (symbols bị lọc bỏ theo trade_mode)
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    def create_filtered_symbols_tab(self):
+        """
+        Tab hiển thị danh sách symbols bị lọc bỏ theo trade_mode
+        Giúp user kiểm tra xem các symbols bị loại có đúng với ý không
+        """
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="🚫 Filtered Symbols")
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # HEADER SECTION
+        # ═══════════════════════════════════════════════════════════════════════
+        header_frame = ttk.Frame(tab)
+        header_frame.pack(fill='x', pady=(0, 15))
+
+        # Title
+        title_label = ttk.Label(
+            header_frame,
+            text="🚫 Symbols bị lọc bỏ tự động (DISABLED & CLOSEONLY)",
+            font=('Arial', 14, 'bold')
+        )
+        title_label.pack(anchor='w')
+
+        # Description
+        desc_label = ttk.Label(
+            header_frame,
+            text="Symbols với trade_mode DISABLED (Trade: No) hoặc CLOSEONLY (Trade: Close) bị loại bỏ vì không cho phép mở lệnh mới",
+            font=('Arial', 9),
+            foreground='#666666'
+        )
+        desc_label.pack(anchor='w', pady=(3, 0))
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # LEGEND & STATS SECTION
+        # ═══════════════════════════════════════════════════════════════════════
+        info_container = ttk.Frame(tab)
+        info_container.pack(fill='x', pady=(0, 15))
+
+        # Left: Legend - Không expand để tránh khoảng trống
+        legend_frame = ttk.LabelFrame(info_container, text="📖 Chú thích màu sắc", padding=10)
+        legend_frame.pack(side='left', fill='y', padx=(0, 10))
+
+        legend_items = [
+            ("🔴 DISABLED", "#ffcccc", "Trade: No - Hoàn toàn không cho phép trade"),
+            ("🟡 CLOSEONLY", "#ffffcc", "Trade: Close - Chỉ cho phép đóng lệnh")
+        ]
+
+        for label, color, desc in legend_items:
+            item_frame = ttk.Frame(legend_frame)
+            item_frame.pack(fill='x', pady=2)
+
+            # Color box
+            color_canvas = tk.Canvas(item_frame, width=20, height=20, bg=color, highlightthickness=1, highlightbackground='gray')
+            color_canvas.pack(side='left', padx=(0, 8))
+
+            # Label
+            ttk.Label(item_frame, text=label, font=('Arial', 9, 'bold')).pack(side='left')
+            ttk.Label(item_frame, text=f"- {desc}", font=('Arial', 8), foreground='gray').pack(side='left', padx=(5, 0))
+
+        # Right: Statistics - Không expand
+        stats_frame = ttk.LabelFrame(info_container, text="📊 Thống kê", padding=10)
+        stats_frame.pack(side='left', fill='y')
+
+        self.filtered_stats_label = ttk.Label(
+            stats_frame,
+            text="Đang tải...",
+            font=('Arial', 10),
+            justify='left'
+        )
+        self.filtered_stats_label.pack(anchor='w')
+
+        # Refresh button - Chỉ refresh manual và khi restart
+        btn_frame = ttk.Frame(tab)
+        btn_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Button(
+            btn_frame,
+            text="🔄 Refresh danh sách",
+            command=lambda: self.refresh_filtered_symbols()
+        ).pack(side='left')
+
+        ttk.Label(
+            btn_frame,
+            text="(Tự động refresh khi khởi động/restart Python)",
+            font=('Arial', 8),
+            foreground='gray'
+        ).pack(side='left', padx=10)
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # CONTENT SECTION (Scrollable)
+        # ═══════════════════════════════════════════════════════════════════════
+        content_frame = ttk.Frame(tab)
+        content_frame.pack(fill='both', expand=True)
+
+        # Canvas and scrollbar
+        canvas = tk.Canvas(content_frame, bg='#f5f5f5', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(content_frame, orient='vertical', command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+
+        self.filtered_content_frame = scrollable_frame
+
+        # Initial load
+        self.refresh_filtered_symbols()
+    
+    def refresh_filtered_symbols(self):
+        """
+        Refresh danh sách filtered symbols với layout cải thiện
+        """
+        # Clear existing content
+        for widget in self.filtered_content_frame.winfo_children():
+            widget.destroy()
+
+        # Get filtered symbols data (thread-safe)
+        with data_lock:
+            filtered_copy = dict(filtered_symbols)
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # Calculate detailed stats (CHỈ DISABLED & CLOSEONLY)
+        # ═══════════════════════════════════════════════════════════════════════
+        total_brokers = len(filtered_copy)
+        total_filtered = 0
+        count_disabled = 0
+        count_closeonly = 0
+
+        # Count by trade_mode and prepare data structure (CHỈ 2 loại)
+        symbols_by_mode = {
+            'DISABLED': [],   # [(broker, symbol, timestamp), ...]
+            'CLOSEONLY': []
+        }
+
+        for broker, symbols in filtered_copy.items():
+            for symbol, info in symbols.items():
+                total_filtered += 1
+                trade_mode = info.get('trade_mode', 'UNKNOWN').upper()
+                timestamp = info.get('timestamp', 0)
+
+                if trade_mode == 'DISABLED':
+                    count_disabled += 1
+                    symbols_by_mode['DISABLED'].append((broker, symbol, timestamp))
+                elif trade_mode == 'CLOSEONLY':
+                    count_closeonly += 1
+                    symbols_by_mode['CLOSEONLY'].append((broker, symbol, timestamp))
+
+        # Update stats with breakdown (CHỈ 2 loại)
+        stats_text = f"""Tổng số: {total_filtered} symbols bị lọc từ {total_brokers} broker(s)
+
+├─ 🔴 DISABLED: {count_disabled} symbols
+└─ 🟡 CLOSEONLY: {count_closeonly} symbols"""
+
+        self.filtered_stats_label.config(text=stats_text)
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # Display message if no filtered symbols
+        # ═══════════════════════════════════════════════════════════════════════
+        if total_filtered == 0:
+            no_data_frame = ttk.Frame(self.filtered_content_frame)
+            no_data_frame.pack(expand=True, fill='both', pady=50)
+
+            ttk.Label(
+                no_data_frame,
+                text="✅ Không có symbols bị lọc",
+                font=('Arial', 14, 'bold'),
+                foreground='#28a745'
+            ).pack()
+
+            ttk.Label(
+                no_data_frame,
+                text="Tất cả symbols đều có trade_mode hợp lệ (không có DISABLED hoặc CLOSEONLY)",
+                font=('Arial', 10),
+                foreground='gray'
+            ).pack(pady=(5, 0))
+            return
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # Display: DISABLED (left) + CLOSEONLY (right) - Side by side only
+        # ═══════════════════════════════════════════════════════════════════════
+        mode_colors = {
+            'DISABLED': '#ffcccc',
+            'CLOSEONLY': '#ffffcc'
+        }
+        mode_icons = {
+            'DISABLED': '🔴',
+            'CLOSEONLY': '🟡'
+        }
+        mode_desc = {
+            'DISABLED': 'Trade: No - Không cho phép trade',
+            'CLOSEONLY': 'Trade: Close - Chỉ cho phép đóng lệnh'
+        }
+
+        disabled_list = symbols_by_mode['DISABLED']
+        closeonly_list = symbols_by_mode['CLOSEONLY']
+
+        if disabled_list or closeonly_list:
+            # Container cho 2 cột
+            row_container = ttk.Frame(self.filtered_content_frame)
+            row_container.pack(fill='both', expand=True, padx=10, pady=8)
+
+            # ═══ LEFT COLUMN: DISABLED ═══
+            if disabled_list:
+                disabled_list.sort(key=lambda x: (x[0], x[1]))
+                self._create_trade_mode_panel(
+                    row_container,
+                    'DISABLED',
+                    disabled_list,
+                    mode_icons['DISABLED'],
+                    mode_desc['DISABLED'],
+                    mode_colors['DISABLED'],
+                    side='left',
+                    padx=(0, 5)
+                )
+
+            # ═══ RIGHT COLUMN: CLOSEONLY ═══
+            if closeonly_list:
+                closeonly_list.sort(key=lambda x: (x[0], x[1]))
+                self._create_trade_mode_panel(
+                    row_container,
+                    'CLOSEONLY',
+                    closeonly_list,
+                    mode_icons['CLOSEONLY'],
+                    mode_desc['CLOSEONLY'],
+                    mode_colors['CLOSEONLY'],
+                    side='left',
+                    padx=(5, 0)
+                )
+
+    def _create_trade_mode_panel(self, parent, trade_mode, symbols_list, icon, description, color, side='top', padx=(0, 0), full_width=False):
+        """
+        Helper function để tạo panel cho mỗi trade_mode
+
+        Args:
+            parent: Parent widget
+            trade_mode: DISABLED, CLOSEONLY, UNKNOWN
+            symbols_list: List of (broker, symbol, timestamp) tuples
+            icon: Emoji icon
+            description: Description text
+            color: Background color
+            side: 'top', 'left', 'right' - pack direction
+            padx: Padding tuple (left, right)
+            full_width: True if should use fill='both', False if fill='both' with expand
+        """
+        # Group frame
+        group_frame = ttk.LabelFrame(
+            parent,
+            text=f"{icon} {trade_mode} - {len(symbols_list)} symbols",
+            padding=10
+        )
+
+        if full_width:
+            group_frame.pack(fill='x', padx=padx, pady=8)
+        else:
+            group_frame.pack(side=side, fill='both', expand=True, padx=padx, pady=8)
+
+        # Description
+        ttk.Label(
+            group_frame,
+            text=description,
+            font=('Arial', 8),
+            foreground='#666666'
+        ).pack(anchor='w', pady=(0, 8))
+
+        # ═══════════════════════════════════════════════════════════════
+        # Table with data + Scrollbar
+        # ═══════════════════════════════════════════════════════════════
+
+        # Container frame để tree và scrollbar không bị lệch
+        table_container = ttk.Frame(group_frame)
+        table_container.pack(fill='both', expand=True, pady=(0, 5))
+
+        # Scrollbar - pack TRƯỚC ở bên phải
+        tree_scroll = ttk.Scrollbar(table_container, orient='vertical')
+        tree_scroll.pack(side='right', fill='y')
+
+        # Tree - pack SAU ở bên trái
+        columns = ('Broker', 'Symbol', 'Last Update')
+        tree = ttk.Treeview(
+            table_container,
+            columns=columns,
+            show='headings',
+            height=min(len(symbols_list), 12),
+            yscrollcommand=tree_scroll.set
+        )
+
+        # Configure scrollbar command
+        tree_scroll.config(command=tree.yview)
+
+        tree.heading('Broker', text='Broker')
+        tree.heading('Symbol', text='Symbol')
+        tree.heading('Last Update', text='Last Update')
+
+        tree.column('Broker', width=150, anchor='w')
+        tree.column('Symbol', width=120, anchor='w')
+        tree.column('Last Update', width=150, anchor='center')
+
+        # Add data
+        for broker, symbol, timestamp in symbols_list:
+            # Format timestamp
+            if timestamp:
+                try:
+                    dt = datetime.fromtimestamp(timestamp)
+                    time_str = dt.strftime('%H:%M:%S %d/%m/%Y')
+                except:
+                    time_str = 'N/A'
+            else:
+                time_str = 'N/A'
+
+            tree.insert('', 'end', values=(broker, symbol, time_str), tags=(trade_mode.lower(),))
+
+        # Apply background color
+        tree.tag_configure(trade_mode.lower(), background=color)
+
+        # Pack tree
+        tree.pack(side='left', fill='both', expand=True)
+
+    
+    # ═══ REMOVED: Auto refresh every 5s ═══
+    # Filtered symbols tab chỉ refresh khi:
+    # 1. Khởi động Python
+    # 2. Restart Python (nút restart)
+    # 3. User click nút Refresh manually
+    # def auto_refresh_filtered(self): ...
+
     def create_tools_tab(self):
         """Create Tools tab for Trading Hours & Raw Data"""
         tools_frame = ttk.Frame(self.notebook, padding="10")
@@ -8736,30 +9822,6 @@ Cách sử dụng:
                   command=self.refresh_statistics,
                   width=25).pack(anchor=tk.W, pady=10)
 
-        # Trading Hours section
-        trading_hours_section = ttk.LabelFrame(tools_frame, text="📅 Giờ giao dịch", padding="20")
-        trading_hours_section.pack(fill=tk.X, pady=10)
-
-        ttk.Label(trading_hours_section,
-                 text="Xem giờ trade của các symbols từ các sàn",
-                 foreground='blue').pack(anchor=tk.W, pady=5)
-
-        ttk.Button(trading_hours_section, text="📅 Mở giờ giao dịch",
-                  command=self.main_app.open_trading_hours,
-                  width=30).pack(anchor=tk.W, pady=5)
-
-        # Raw Data section
-        raw_data_section = ttk.LabelFrame(tools_frame, text="📊 Xem dữ liệu thô", padding="20")
-        raw_data_section.pack(fill=tk.X, pady=10)
-
-        ttk.Label(raw_data_section,
-                 text="Xem raw data từ MT4/MT5 (giá bid/ask, OHLC, v.v.)",
-                 foreground='blue').pack(anchor=tk.W, pady=5)
-
-        ttk.Button(raw_data_section, text="📊 Mở xem dữ liệu thô",
-                  command=self.main_app.open_raw_data_viewer,
-                  width=30).pack(anchor=tk.W, pady=5)
-        
         # Auto reset Python section
         python_reset_section = ttk.LabelFrame(tools_frame, text="🔁 Tự động khởi động lại Python", padding="20")
         python_reset_section.pack(fill=tk.X, pady=10)
@@ -8814,6 +9876,30 @@ Cách sử dụng:
                   command=self.main_app.open_connected_brokers,
                   width=30).pack(anchor=tk.W, pady=5)
 
+        # Trading Hours section
+        trading_hours_section = ttk.LabelFrame(tools_frame, text="📅 Giờ giao dịch", padding="20")
+        trading_hours_section.pack(fill=tk.X, pady=10)
+
+        ttk.Label(trading_hours_section,
+                 text="Xem giờ trade của các symbols từ các sàn",
+                 foreground='blue').pack(anchor=tk.W, pady=5)
+
+        ttk.Button(trading_hours_section, text="📅 Mở giờ giao dịch",
+                  command=self.main_app.open_trading_hours,
+                  width=30).pack(anchor=tk.W, pady=5)
+
+        # Raw Data section
+        raw_data_section = ttk.LabelFrame(tools_frame, text="📊 Xem dữ liệu thô", padding="20")
+        raw_data_section.pack(fill=tk.X, pady=10)
+
+        ttk.Label(raw_data_section,
+                 text="Xem raw data từ MT4/MT5 (giá bid/ask, OHLC, v.v.)",
+                 foreground='blue').pack(anchor=tk.W, pady=5)
+
+        ttk.Button(raw_data_section, text="📊 Mở xem dữ liệu thô",
+                  command=self.main_app.open_raw_data_viewer,
+                  width=30).pack(anchor=tk.W, pady=5)
+
     def create_auto_send_tab(self):
         """Create Auto-Send Google Sheets Settings tab"""
         auto_send_frame = ttk.Frame(self.notebook, padding="10")
@@ -8842,10 +9928,15 @@ Cách sử dụng:
         self.sheet_name_var = tk.StringVar(value=auto_send_settings['sheet_name'])
         ttk.Entry(url_frame, textvariable=self.sheet_name_var, width=30).grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
 
-        ttk.Label(url_frame, text="Cột bắt đầu:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(url_frame, text="Sheet Điểm danh:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.attendance_sheet_name_var = tk.StringVar(value=auto_send_settings.get('attendance_sheet_name', 'Điểm danh'))
+        ttk.Entry(url_frame, textvariable=self.attendance_sheet_name_var, width=30).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(url_frame, text="(Sheet ghi điểm danh)", foreground='gray', font=('Arial', 8)).grid(row=2, column=1, padx=(200, 0), sticky=tk.W)
+
+        ttk.Label(url_frame, text="Cột bắt đầu:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
         self.start_column_var = tk.StringVar(value=auto_send_settings['start_column'])
-        ttk.Entry(url_frame, textvariable=self.start_column_var, width=5).grid(row=2, column=1, sticky=tk.W, padx=5, pady=5)
-        ttk.Label(url_frame, text="(VD: A, B, C, ...)", foreground='gray', font=('Arial', 8)).grid(row=2, column=1, padx=(50, 0), sticky=tk.W)
+        ttk.Entry(url_frame, textvariable=self.start_column_var, width=5).grid(row=3, column=1, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(url_frame, text="(VD: A, B, C, ...)", foreground='gray', font=('Arial', 8)).grid(row=3, column=1, padx=(50, 0), sticky=tk.W)
 
         # Column mapping
         columns_frame = ttk.LabelFrame(auto_send_frame, text="📋 Cột cần gửi", padding="10")
@@ -8858,8 +9949,14 @@ Cách sử dụng:
         self.col_assignee_var = tk.BooleanVar(value=columns_config.get('assignee', True))
         ttk.Checkbutton(columns_frame, text="👤 Người lọc (Tên)", variable=self.col_assignee_var).pack(anchor=tk.W, padx=20)
 
+        self.col_send_time_var = tk.BooleanVar(value=columns_config.get('send_time', True))
+        ttk.Checkbutton(columns_frame, text="📅 Thời gian gửi (Khi bấm Hoàn thành)", variable=self.col_send_time_var).pack(anchor=tk.W, padx=20)
+
+        self.col_note_var = tk.BooleanVar(value=columns_config.get('note', True))
+        ttk.Checkbutton(columns_frame, text="📝 Note (Báo Cáo / Không có kèo)", variable=self.col_note_var).pack(anchor=tk.W, padx=20)
+
         self.col_time_var = tk.BooleanVar(value=columns_config.get('time', True))
-        ttk.Checkbutton(columns_frame, text="⏰ Time (Thời gian chụp)", variable=self.col_time_var).pack(anchor=tk.W, padx=20)
+        ttk.Checkbutton(columns_frame, text="⏰ Server Time (Thời gian từ MT4/MT5)", variable=self.col_time_var).pack(anchor=tk.W, padx=20)
         
         self.col_broker_var = tk.BooleanVar(value=columns_config.get('broker', True))
         ttk.Checkbutton(columns_frame, text="🏦 Broker (Sàn)", variable=self.col_broker_var).pack(anchor=tk.W, padx=20)
@@ -8915,10 +10012,13 @@ Cách sử dụng:
             auto_send_settings['enabled'] = True  # Enable once configured
             auto_send_settings['sheet_url'] = sheet_url
             auto_send_settings['sheet_name'] = sheet_name
+            auto_send_settings['attendance_sheet_name'] = self.attendance_sheet_name_var.get().strip()
             auto_send_settings['start_column'] = start_column
 
             columns_config = auto_send_settings.setdefault('columns', {})
             columns_config['assignee'] = self.col_assignee_var.get()
+            columns_config['send_time'] = self.col_send_time_var.get()
+            columns_config['note'] = self.col_note_var.get()
             columns_config['time'] = self.col_time_var.get()
             columns_config['broker'] = self.col_broker_var.get()
             columns_config['symbol'] = self.col_symbol_var.get()
@@ -9955,6 +11055,30 @@ Cách sử dụng:
             logger.error(f"Error clearing all hidden delays: {e}")
             messagebox.showerror("Error", f"Lỗi clear all: {str(e)}")
 
+    # ==================== WINDOW CONTROLS ====================
+    def toggle_maximize(self):
+        """✨ Toggle between maximized and normal window state"""
+        try:
+            if self.is_maximized:
+                # Restore to normal size
+                self.window.state('normal')
+                self.is_maximized = False
+                self.maximize_button.config(text="🔲 Phóng to toàn màn hình")
+                logger.info("Settings window restored to normal size")
+            else:
+                # Maximize window
+                self.window.state('zoomed')
+                # For Linux, try both methods
+                try:
+                    self.window.attributes('-zoomed', True)
+                except:
+                    pass
+                self.is_maximized = True
+                self.maximize_button.config(text="🗗 Thu nhỏ")
+                logger.info("Settings window maximized")
+        except Exception as e:
+            logger.error(f"Error toggling maximize: {e}")
+
     # ==================== GLOBAL REFRESH ====================
     def refresh_all_hidden_lists(self):
         """Refresh both alert and delay hidden lists"""
@@ -10810,19 +11934,33 @@ class PictureGalleryWindow:
         self.main_app = main_app
         self.window = tk.Toplevel(parent)
         self.window.title("📸 Picture Gallery - Gap & Spike Screenshots")
-        self.window.geometry("1200x800")
-        
+
+        # ✨ Set window size to 3/4 of screen
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        window_width = int(screen_width * 0.75)
+        window_height = int(screen_height * 0.75)
+
+        # Center the window
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+
+        self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
         # Make window modal - chặn thao tác cửa sổ parent
         self.window.transient(parent)  # Window luôn nằm trên parent
         self.window.grab_set()  # Chặn input đến parent window
-        
+
         self.window.lift()  # Đưa cửa sổ lên trên
         self.window.focus_force()  # Focus vào cửa sổ
-        
+
         # Current selected image
         self.current_image = None
         self.current_image_path = None
-        
+
+        # ✨ FIX: Store filtered files to avoid rebuilding with different sort order
+        self.filtered_files = []
+
         # Accepted screenshots for Google Sheets
         self.accepted_screenshots = []
         
@@ -10861,6 +11999,10 @@ class PictureGalleryWindow:
         self.filter_broker.pack(side=tk.LEFT, padx=5)
         self.filter_broker.bind('<<ComboboxSelected>>', lambda e: self.load_pictures())
 
+        # ✨ Sort button - Lọc theo broker + symbol
+        ttk.Button(filter_frame, text="📊 Lọc sản phẩm",
+                  command=self.sort_by_product).pack(side=tk.LEFT, padx=5)
+
         ttk.Label(filter_frame, text="Tên:").pack(side=tk.LEFT, padx=5)
         initial_name = screenshot_settings.get('assigned_name', '')
         name_choices = list(PICTURE_ASSIGNEE_CHOICES)
@@ -10895,11 +12037,14 @@ class PictureGalleryWindow:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.image_listbox = tk.Listbox(list_frame, width=40, height=30,
-                                        yscrollcommand=scrollbar.set)
+        # ✨ EXTENDED mode: Hỗ trợ Ctrl (chọn nhiều) và Shift (chọn range)
+        # ✨ Increased width from 40 to 70 for better visibility
+        self.image_listbox = tk.Listbox(list_frame, width=70, height=30,
+                                        yscrollcommand=scrollbar.set,
+                                        selectmode=tk.EXTENDED)
         self.image_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.image_listbox.yview)
-        
+
         self.image_listbox.bind('<<ListboxSelect>>', self.on_image_select)
         
         # RIGHT: Image preview
@@ -10936,11 +12081,17 @@ class PictureGalleryWindow:
         
         accepted_scrollbar = ttk.Scrollbar(accepted_list_frame)
         accepted_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+
+        # ✨ EXTENDED mode: Cho phép chọn nhiều ảnh để xóa khỏi accepted list
         self.accepted_listbox = tk.Listbox(accepted_list_frame, height=4,
-                                           yscrollcommand=accepted_scrollbar.set)
+                                           yscrollcommand=accepted_scrollbar.set,
+                                           selectmode=tk.EXTENDED)
         self.accepted_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         accepted_scrollbar.config(command=self.accepted_listbox.yview)
+
+        # ✨ Bind Delete key cho accepted list
+        self.accepted_listbox.bind('<Delete>', lambda e: self.remove_selected_accepted())
+        self.accepted_listbox.bind('<KeyPress-Delete>', lambda e: self.remove_selected_accepted())
         
         # Complete button
         complete_frame = ttk.Frame(accepted_frame)
@@ -10950,12 +12101,16 @@ class PictureGalleryWindow:
                                               font=('Arial', 10, 'bold'))
         self.accepted_count_label.pack(side=tk.LEFT, padx=10)
         
-        ttk.Button(complete_frame, text="📊 Hoàn thành - Gửi lên Google Sheets", 
+        ttk.Button(complete_frame, text="📊 Hoàn thành - Chấm Công",
                   command=self.complete_and_send,
                   style='Accent.TButton').pack(side=tk.RIGHT, padx=5)
-        
-        ttk.Button(complete_frame, text="🗑️ Clear Accepted", 
+
+        ttk.Button(complete_frame, text="🗑️ Clear Accepted",
                   command=self.clear_accepted).pack(side=tk.RIGHT, padx=5)
+
+        # ✨ Remove selected button - Xóa các ảnh đã chọn khỏi accepted list
+        ttk.Button(complete_frame, text="❌ Remove Selected",
+                  command=self.remove_selected_accepted).pack(side=tk.RIGHT, padx=5)
         
         # Info label
         self.info_label = ttk.Label(self.window, text="No screenshots yet", 
@@ -11007,25 +12162,26 @@ class PictureGalleryWindow:
             # Filter images
             filter_type = self.filter_type_var.get()
             filter_broker = self.filter_broker_var.get()
-            
-            filtered_files = []
+
+            # ✨ FIX: Store in instance variable to maintain sort order consistency
+            self.filtered_files = []
             for filepath in image_files:
                 filename = os.path.basename(filepath)
-                
+
                 # Filter by type
                 if filter_type != "All":
                     if f"_{filter_type}_" not in filename:
                         continue
-                
+
                 # Filter by broker
                 if filter_broker != "All":
                     if not filename.startswith(filter_broker + "_"):
                         continue
-                
-                filtered_files.append(filepath)
-            
+
+                self.filtered_files.append(filepath)
+
             # Add to listbox
-            for filepath in filtered_files:
+            for filepath in self.filtered_files:
                 filename = os.path.basename(filepath)
                 # Parse filename: broker_symbol_type_timestamp.png
                 parts = filename.replace('.png', '').split('_')
@@ -11042,8 +12198,9 @@ class PictureGalleryWindow:
                         time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
                     except:
                         time_str = timestamp_str
-                    
-                    display = f"[Server] {time_str} | {broker} {symbol} | {detection_type.upper()}"
+
+                    # ✨ Removed "[Server]" prefix for cleaner display
+                    display = f"{time_str} | {broker} {symbol} | {detection_type.upper()}"
                     self.image_listbox.insert(tk.END, display)
                 else:
                     # Fallback
@@ -11051,7 +12208,7 @@ class PictureGalleryWindow:
             
             # Update info
             total = len(image_files)
-            shown = len(filtered_files)
+            shown = len(self.filtered_files)
             self.info_label.config(text=f"Total: {total} screenshots | Shown: {shown}")
             
         except Exception as e:
@@ -11064,37 +12221,15 @@ class PictureGalleryWindow:
             selection = self.image_listbox.curselection()
             if not selection:
                 return
-            
+
             index = selection[0]
-            
-            # Get all files again (same filtering)
-            folder = screenshot_settings['folder']
-            pattern = os.path.join(folder, "*.png")
-            image_files = glob.glob(pattern)
-            image_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-            
-            # Filter images (same logic as load_pictures)
-            filter_type = self.filter_type_var.get()
-            filter_broker = self.filter_broker_var.get()
-            
-            filtered_files = []
-            for filepath in image_files:
-                filename = os.path.basename(filepath)
-                
-                if filter_type != "All":
-                    if f"_{filter_type}_" not in filename:
-                        continue
-                
-                if filter_broker != "All":
-                    if not filename.startswith(filter_broker + "_"):
-                        continue
-                
-                filtered_files.append(filepath)
-            
-            if index < len(filtered_files):
-                filepath = filtered_files[index]
+
+            # ✨ FIX: Use stored filtered_files instead of rebuilding with different sort order
+            # This ensures the index matches the displayed list order
+            if index < len(self.filtered_files):
+                filepath = self.filtered_files[index]
                 self.display_image(filepath)
-        
+
         except Exception as e:
             logger.error(f"Error selecting image: {e}")
     
@@ -11148,49 +12283,63 @@ class PictureGalleryWindow:
                                    fill='red', font=('Arial', 12))
     
     def delete_selected(self):
-        """Delete selected screenshot - NO CONFIRM (direct delete)"""
+        """Delete selected screenshot(s) - Support multi-select with Ctrl/Shift"""
         try:
-            if not self.current_image_path:
-                # No warning, just ignore if nothing selected
+            # Get all selected indices
+            selected_indices = self.image_listbox.curselection()
+            if not selected_indices:
+                return  # No selection
+
+            # ✨ FIX: Use stored filtered_files to ensure correct file deletion
+            # Get files to delete
+            files_to_delete = []
+            for index in selected_indices:
+                if index < len(self.filtered_files):
+                    files_to_delete.append(self.filtered_files[index])
+
+            if not files_to_delete:
                 return
-            
-            # Get current selection index
-            current_selection = self.image_listbox.curselection()
-            current_index = current_selection[0] if current_selection else 0
-            
-            # Delete file directly - NO CONFIRM
-            os.remove(self.current_image_path)
-            logger.info(f"Deleted screenshot: {self.current_image_path}")
-            
+
+            # Delete all selected files
+            deleted_count = 0
+            for filepath in files_to_delete:
+                try:
+                    os.remove(filepath)
+                    # Also delete metadata file if exists
+                    metadata_path = os.path.splitext(filepath)[0] + '.json'
+                    if os.path.exists(metadata_path):
+                        os.remove(metadata_path)
+                    deleted_count += 1
+                    logger.info(f"Deleted screenshot: {filepath}")
+                except Exception as del_err:
+                    logger.error(f"Error deleting {filepath}: {del_err}")
+
             # Clear display
             self.canvas.delete("all")
             self.current_image = None
             self.current_image_path = None
-            
+
             # Reload list
             self.load_pictures()
-            
-            # Auto-select next image (or previous if last was deleted)
+
+            # Auto-select next image
             total_items = self.image_listbox.size()
             if total_items > 0:
-                # If current index still exists, select it (next image took its place)
-                # Otherwise select last item
-                new_index = min(current_index, total_items - 1)
+                first_index = selected_indices[0]
+                new_index = min(first_index, total_items - 1)
                 self.image_listbox.selection_clear(0, tk.END)
                 self.image_listbox.selection_set(new_index)
                 self.image_listbox.activate(new_index)
                 self.image_listbox.see(new_index)
-                # Trigger selection event to display the image
                 self.on_image_select(None)
             else:
-                # No more images
                 self.info_label.config(text="Không còn screenshot nào")
-        
+
+            logger.info(f"Deleted {deleted_count} screenshot(s)")
+
         except Exception as e:
-            logger.error(f"Error deleting image: {e}")
-            # Show error but keep focus on this window
+            logger.error(f"Error deleting images: {e}")
             messagebox.showerror("Lỗi", f"Không thể xóa hình: {str(e)}")
-            # Re-grab focus after messagebox
             self.window.grab_set()
             self.window.focus_force()
     
@@ -11419,43 +12568,150 @@ class PictureGalleryWindow:
         self.accepted_screenshots.clear()
         self.update_accepted_display()
         logger.info("Cleared accepted screenshots")
-    
+
+    def remove_selected_accepted(self):
+        """Remove selected items from accepted list"""
+        try:
+            selected_indices = self.accepted_listbox.curselection()
+            if not selected_indices:
+                return  # No selection
+
+            # Remove items in reverse order (to avoid index shifting)
+            for index in reversed(selected_indices):
+                if index < len(self.accepted_screenshots):
+                    removed_item = self.accepted_screenshots.pop(index)
+                    logger.info(f"Removed from accepted: {removed_item.get('filename', 'Unknown')}")
+
+            # Update display
+            self.update_accepted_display()
+            logger.info(f"Removed {len(selected_indices)} item(s) from accepted list")
+
+        except Exception as e:
+            logger.error(f"Error removing accepted items: {e}")
+
+    def sort_by_product(self):
+        """Sort screenshots by broker name then symbol name"""
+        try:
+            # Get pictures folder
+            folder = screenshot_settings['folder']
+            if not os.path.exists(folder):
+                return
+
+            # Get all PNG files
+            pattern = os.path.join(folder, "*.png")
+            image_files = glob.glob(pattern)
+
+            # Apply filters
+            filter_type = self.filter_type_var.get()
+            filter_broker = self.filter_broker_var.get()
+
+            # ✨ FIX: Store in instance variable to maintain sort order
+            self.filtered_files = []
+            for filepath in image_files:
+                filename = os.path.basename(filepath)
+
+                # Filter by type
+                if filter_type != "All":
+                    if f"_{filter_type}_" not in filename:
+                        continue
+
+                # Filter by broker
+                if filter_broker != "All":
+                    if not filename.startswith(filter_broker + "_"):
+                        continue
+
+                self.filtered_files.append(filepath)
+
+            # Sort by broker + symbol
+            def get_broker_symbol(filepath):
+                filename = os.path.basename(filepath)
+                parts = filename.replace('.png', '').split('_')
+                if len(parts) >= 2:
+                    broker = parts[0]
+                    symbol = parts[1]
+                    return (broker, symbol)
+                return ('', '')
+
+            self.filtered_files.sort(key=get_broker_symbol)
+
+            # Rebuild listbox with sorted order
+            self.image_listbox.delete(0, tk.END)
+
+            for filepath in self.filtered_files:
+                filename = os.path.basename(filepath)
+                parts = filename.replace('.png', '').split('_')
+
+                if len(parts) >= 4:
+                    broker = parts[0]
+                    symbol = parts[1]
+                    detection_type = parts[2]
+                    timestamp_str = '_'.join(parts[3:])
+
+                    # Format display
+                    try:
+                        dt = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                        time_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        time_str = timestamp_str
+
+                    # ✨ Removed "[Server]" prefix for cleaner display
+                    display = f"{time_str} | {broker} {symbol} | {detection_type.upper()}"
+                    self.image_listbox.insert(tk.END, display)
+                else:
+                    # Fallback
+                    self.image_listbox.insert(tk.END, filename)
+
+            # Update info
+            self.info_label.config(text=f"Sorted by product: {len(self.filtered_files)} screenshots")
+            logger.info(f"Sorted {len(self.filtered_files)} screenshots by broker + symbol")
+
+        except Exception as e:
+            logger.error(f"Error sorting by product: {e}")
+            messagebox.showerror("Lỗi", f"Không thể sắp xếp: {str(e)}")
+            self.window.grab_set()
+
     def complete_and_send(self):
         """Send all accepted screenshots to Google Sheets"""
         try:
-            if not self.accepted_screenshots:
-                messagebox.showinfo("Thông báo", "Chưa có ảnh nào được Accept!\n\nHãy click 'Accept' hoặc nhấn Enter trên các ảnh muốn gửi.")
-                self.window.grab_set()
-                return
-            
-            # Confirm
+            # ✨ Lấy assignee từ dropdown
+            assignee = self.assigned_name_var.get().strip() if hasattr(self, 'assigned_name_var') else ''
+
+            # Confirm - khác nhau tùy trường hợp
             count = len(self.accepted_screenshots)
-            confirm = messagebox.askyesno("Xác nhận", 
-                                         f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
-                                         f"Sau khi gửi thành công, list sẽ được xóa.")
-            
+            if not self.accepted_screenshots:
+                # ✨ Trường hợp KHÔNG có ảnh - gửi "KÉO SÀN"
+                confirm = messagebox.askyesno("Xác nhận",
+                                             f"Bạn chưa Accept ảnh nào.\n\n"
+                                             f"Gửi thông báo 'KÉO SÀN' lên Google Sheets?\n\n"
+                                             f"Người gửi: {assignee or '(Chưa chọn)'}")
+            else:
+                # ✨ Trường hợp CÓ ảnh - gửi "KÉO SÀN"
+                confirm = messagebox.askyesno("Xác nhận",
+                                             f"Gửi {count} ảnh lên Google Sheets:\n\n'{GOOGLE_SHEET_NAME}'?\n\n"
+                                             f"Sau khi gửi thành công, list sẽ được xóa.")
+
             if not confirm:
                 self.window.grab_set()
                 return
-            
+
             # Show progress
             self.info_label.config(text="⏳ Đang gửi lên Google Sheets...")
             self.window.update()
-            
-            # Push to Google Sheets
-            success, message = push_to_google_sheets(self.accepted_screenshots)
-            
+
+            # Push to Google Sheets (với assignee cho trường hợp không có ảnh)
+            success, message = push_to_google_sheets(self.accepted_screenshots, assignee=assignee)
+
             if success:
                 messagebox.showinfo("Thành công", message)
                 # Clear accepted list after successful send
                 self.clear_accepted()
             else:
                 messagebox.showerror("Lỗi", message)
-            
+
             self.info_label.config(text="")
             self.window.grab_set()
             self.window.focus_force()
-        
+
         except Exception as e:
             logger.error(f"Error sending to Google Sheets: {e}")
             messagebox.showerror("Lỗi", f"Không thể gửi: {str(e)}")
@@ -12103,7 +13359,6 @@ def main():
     load_manual_hidden_delays()
     load_audio_settings()
     load_symbol_filter_settings()
-    load_broker_selection_settings()  # Load broker selection settings
     load_delay_settings()
     load_product_delay_settings()
     load_hidden_products()
@@ -12121,34 +13376,16 @@ def main():
 
     # Ensure pictures folder exists
     ensure_pictures_folder()
-
-    # Create root window for GUI
-    root = tk.Tk()
-    root.withdraw()  # Hide main window temporarily
-
-    # Show broker selection dialog at startup
-    dialog = BrokerSelectionDialog(root)
-    selected_brokers = dialog.show()
-
-    # Save selected brokers if user confirmed
-    if selected_brokers is not None:
-        broker_selection_settings['enabled_brokers'] = selected_brokers
-        save_broker_selection_settings()
-        logger.info(f"User selected {len(selected_brokers)} brokers: {selected_brokers}")
-    else:
-        logger.info("User cancelled broker selection, using existing settings")
-
-    # Show main window
-    root.deiconify()
-
+    
     # Start Flask server in background thread
     flask_thread = threading.Thread(target=run_flask_server, daemon=True)
     flask_thread.start()
-
+    
     logger.info(f"Flask server started on http://{HTTP_HOST}:{HTTP_PORT}")
     logger.info(f"EA should send data to: http://127.0.0.1:{HTTP_PORT}/api/receive_data")
-
+    
     # Start GUI
+    root = tk.Tk()
     app_gui = GapSpikeDetectorGUI(root)
     
     # Log initial message
